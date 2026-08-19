@@ -1,0 +1,176 @@
+From aa6b04df60cd2ae096cb0a6895b28fb1f347355d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Mon, 17 Aug 2026 14:41:58 -0700
+Subject: [PATCH] Bake the Gaia-less local-account defaults into ash-chrome
+
+session_manager only applies /etc/chrome_dev.conf when
+is_developer_end_user() -- i.e. when cros_debug is on the kernel command
+line (login_manager chrome_setup.cc:556). Official/release images never
+have cros_debug, so the BSP's chrome_dev.conf block (dummy API keys,
+--disable-gaia-services, --profile-requires-policy=false and friends)
+silently vanished on exactly the images that ship. Without the policy
+trio a Gaia-less login makes DevicePolicyService::Initialize() report
+kBadPolicyKey and the device powerwashes itself a couple of boots later.
+
+Move the defaults into ChromeMainDelegate::BasicStartupComplete(), the
+earliest callback after the CommandLine exists, applied to the browser
+process only (the same scope a chrome_dev.conf line has). Everything is
+add-if-absent / set-if-unset, so session_manager and chrome_dev.conf on
+dev images still override; the BSP's chrome_dev.conf block stays for
+that purpose plus the dev-only devtools flags.
+
+Flags preserved verbatim from chromeos-bsp-colorburst pkg_postinst:
+GOOGLE_API_KEY / GOOGLE_DEFAULT_CLIENT_ID / GOOGLE_DEFAULT_CLIENT_SECRET
+(dummy values, via the environment google_apis reads),
+--disable-gaia-services, --skip-force-online-signin-for-testing,
+--disable-hid-detection-on-oobe, --profile-requires-policy=false,
+--allow-failed-policy-fetch-for-test, --disable-policy-key-verification,
+--cros-region=vn.
+
+
+
+---
+ chrome/BUILD.gn                    |  4 ++
+ chrome/app/BUILD.gn                |  4 ++
+ chrome/app/chrome_main_delegate.cc | 80 ++++++++++++++++++++++++++++++
+ 3 files changed, 88 insertions(+)
+
+diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
+index 7873418e78..406f06b5cb 100644
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -354,6 +354,10 @@ if (!is_android && !is_mac) {
+           "//chrome/browser/ash/locale",
+           "//chrome/browser/ash/schedqos",
+           "//chromeos/ash/experiences/arc:arc_base_utils",
++
++          # NOTE(colorburst fork): policy switches for the local-account
++          # defaults in chrome_main_delegate.cc.
++          "//components/policy/core/common:common_constants",
+         ]
+       }
+ 
+diff --git a/chrome/app/BUILD.gn b/chrome/app/BUILD.gn
+index 07e4d3aa87..2422ce438a 100644
+--- a/chrome/app/BUILD.gn
++++ b/chrome/app/BUILD.gn
+@@ -227,6 +227,10 @@ static_library("test_support") {
+       "//chromeos/ash/components/memory",
+       "//chromeos/ash/experiences/arc:arc_base_utils",
+       "//chromeos/dbus/constants",
++
++      # NOTE(colorburst fork): policy switches for the local-account defaults
++      # in chrome_main_delegate.cc.
++      "//components/policy/core/common:common_constants",
+     ]
+   }
+ 
+diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
+index 45f00944bf..5deb1e202e 100644
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -160,6 +160,7 @@
+ #include "chromeos/ash/components/memory/mglru.h"
+ #include "chromeos/ash/experiences/arc/arc_util.h"
+ #include "chromeos/dbus/constants/dbus_paths.h"
++#include "components/policy/core/common/policy_switches.h"
+ #include "content/public/common/content_features.h"
+ #endif
+ 
+@@ -1066,6 +1067,75 @@ void ChromeMainDelegate::SetupTracing() {
+           std::move(tracing_factory), unwinder_type);
+ }
+ 
++#if BUILDFLAG(IS_CHROMEOS)
++namespace {
++
++// NOTE(colorburst fork): colorburst sessions are Gaia-less local accounts.
++// The flags that make them work historically came from /etc/chrome_dev.conf,
++// but session_manager only applies that file when is_developer_end_user()
++// (i.e. cros_debug on the kernel command line), so on an official/release
++// image none of them reached Chrome — and without --profile-requires-policy=
++// false and friends, DevicePolicyService::Initialize() fails after a Gaia-less
++// login and InitiateDeviceWipe(kBadPolicyKey) powerwashes the device a couple
++// of boots later. Baking the defaults into Chrome itself makes them
++// unconditional on every image, dev and release alike, and survives BSP or
++// session_manager uprevs. Anything session_manager actually passes (including
++// a chrome_dev.conf line on dev images) still wins: switches are only
++// appended when absent, and the dummy API-key environment variables are only
++// set when unset. Keep this list in sync with the chromeos-bsp-colorburst
++// pkg_postinst block, which remains for dev-image overrides.
++void ApplyColorburstLocalAccountDefaults() {
++  // Chrome refuses to create a user at all when the Google API keys are
++  // absent ("Missing Google API keys"). The local-account path never contacts
++  // Google, so placeholders are enough. (Read by google_apis/api_key_cache.cc
++  // via the environment; overrides are honored on non-official-Google builds,
++  // which colorburst always is.)
++  std::unique_ptr<base::Environment> environment = base::Environment::Create();
++  auto set_default_env = [&environment](base::cstring_view name,
++                                        const std::string& value) {
++    if (!environment->HasVar(name)) {
++      environment->SetVar(name, value);
++    }
++  };
++  set_default_env("GOOGLE_API_KEY", "dummy-not-a-real-key");
++  set_default_env("GOOGLE_DEFAULT_CLIENT_ID", "dummy-not-a-real-id");
++  set_default_env("GOOGLE_DEFAULT_CLIENT_SECRET", "dummy-not-a-real-secret");
++
++  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
++
++  // No Gaia, and do not force online re-auth for an account whose OAuth token
++  // status is necessarily invalid (it never had one).
++  static constexpr const char* kDefaultSwitches[] = {
++      ash::switches::kDisableGaiaServices,
++      ash::switches::kSkipForceOnlineSignInForTesting,
++      ash::switches::kDisableHIDDetectionOnOOBEForTesting,
++      // MANDATORY trio: without these a Gaia-less login has no policy blob and
++      // no owner key, DevicePolicyService::Initialize() reports kBadPolicyKey,
++      // and the device wipes itself.
++      ash::switches::kAllowFailedPolicyFetchForTest,
++      policy::switches::kDisablePolicyKeyVerification,
++  };
++  for (const char* flag : kDefaultSwitches) {
++    if (!command_line->HasSwitch(flag)) {
++      command_line->AppendSwitch(flag);
++    }
++  }
++  if (!command_line->HasSwitch(ash::switches::kProfileRequiresPolicy)) {
++    command_line->AppendSwitchASCII(ash::switches::kProfileRequiresPolicy,
++                                    "false");
++  }
++  // Vietnamese by default: cros-regions.json carries a "vn" entry, and
++  // --cros-region overrides the VPD region, which generic hardware does not
++  // have. Gives Vietnamese OOBE, Asia/Ho_Chi_Minh and the Vietnamese keyboard
++  // layouts.
++  if (!command_line->HasSwitch(ash::switches::kCrosRegion)) {
++    command_line->AppendSwitchASCII(ash::switches::kCrosRegion, "vn");
++  }
++}
++
++}  // namespace
++#endif  // BUILDFLAG(IS_CHROMEOS)
++
+ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
+ #if BUILDFLAG(IS_CHROMEOS)
+   ash::BootTimesRecorder::Get()->SaveChromeMainStats();
+@@ -1100,6 +1170,16 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
+   // The DevTools remote debugging pipe file descriptors need to be checked
+   // before any other files are opened, see https://crbug.com/40259890.
+   const bool is_browser = !command_line.HasSwitch(switches::kProcessType);
++
++#if BUILDFLAG(IS_CHROMEOS)
++  // NOTE(colorburst fork): the Gaia-less local-account defaults, applied to
++  // the browser process only — the same scope a chrome_dev.conf line has.
++  // This is the earliest callback after the CommandLine is initialized, well
++  // before any consumer (login/policy/StatisticsProvider) reads it.
++  if (is_browser) {
++    ApplyColorburstLocalAccountDefaults();
++  }
++#endif
+ #if BUILDFLAG(IS_WIN)
+   const bool pipes_are_specified_explicitly =
+       command_line.HasSwitch(::switches::kRemoteDebuggingIoPipes);
+-- 
+2.53.0
+

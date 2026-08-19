@@ -1,0 +1,223 @@
+From 83951fcf7af011e09d9842348a6a4c8a3368ada0 Mon Sep 17 00:00:00 2001
+From: colorburst <dev@colorburst.invalid>
+Date: Fri, 14 Aug 2026 23:05:14 -0700
+Subject: [PATCH 2/2] Fix three more places that a device-local account falls
+ through
+
+Found by booting the previous commit and walking the OOBE flow. Each is the
+same upstream shape: a check that means "is this a normal human user" is
+written as "does this user have a Gaia account", which stopped being the same
+question once a local account existed.
+
+1. wizard_controller.cc: OnLocalAccountScreenExit called a function that does
+   not exist. Use AdvanceToScreen(UserCreationView::kScreenId).
+
+2. session_manager.cc: SetIsCurrentUserNew() ANDed `new_user` with
+   HasGaiaAccount(), so a brand new local user was not considered new, no
+   onboarding ran, and UserSessionManager backfilled
+   onboarding_completed_version = "0.0.0.0". The observable result was a
+   session on the desktop whose cryptohome had NO auth_factors directory at
+   all -- an account with no password, which the next boot would have
+   discarded. Ask the type instead, which is what the guest/kiosk exclusion
+   here actually means.
+
+3. recovery_eligibility_screen.cc: a local account was silently opted in to
+   cryptohome recovery, which wraps the recovery secret against a
+   Google-hosted service and is redeemed by reauthenticating with Gaia.
+   RecoveryFactorEditor then failed with code 50 and
+   CryptohomeRecoverySetupScreen dead-ended on its error page, stranding the
+   user in OOBE before the password screen. Note the opt-in is a default that
+   is only *confirmed* later on ConsolidatedConsentScreen, which does not run
+   for a Gaia-less user -- so it was both unconsented and unfulfillable.
+
+4. known_user.cc: KnownUser::GetAccountId() never consulted the persisted
+   account_type. The login screen's user list (prefs::kRegularUsersPref) is a
+   flat list of e-mail strings, so UserManagerImpl::ParseUserList()
+   reconstructs every AccountId with AccountType::UNKNOWN; a Google account
+   survives because its gaia id is stored and recovered, but a local account
+   has no id and would silently come back as UNKNOWN, so the LOCAL type would
+   only ever exist during the session that created it.
+
+Verified on a VM: the OOBE card -> the new screen -> a name -> upstream's
+PasswordSelectionScreen forcing LOCAL_PASSWORD_FORCED ->
+LocalPasswordSetupScreen -> auth_factors/password.local-password -> a desktop
+session -> reboot -> the pod on the login screen -> the password typed on a
+synthetic uinput keyboard -> a second session. No test API was used to create
+or authenticate the account.
+---
+ .../ash/login/screens/local_account_screen.cc | 12 +++++++++-
+ .../osauth/recovery_eligibility_screen.cc     | 22 +++++++++++++++++++
+ chrome/browser/ash/login/wizard_controller.cc |  2 +-
+ .../login/screens/common/user_creation.ts     |  7 +++++-
+ .../session_manager/core/session_manager.cc   | 11 +++++++++-
+ components/user_manager/known_user.cc         | 19 ++++++++++++++++
+ 6 files changed, 69 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/ash/login/screens/local_account_screen.cc b/chrome/browser/ash/login/screens/local_account_screen.cc
+index d2ab66172d..1af2870e16 100644
+--- a/chrome/browser/ash/login/screens/local_account_screen.cc
++++ b/chrome/browser/ash/login/screens/local_account_screen.cc
+@@ -94,6 +94,11 @@ void LocalAccountScreen::HideImpl() {}
+ void LocalAccountScreen::OnUserAction(const base::ListValue& args) {
+   const std::string& action_id = args[0].GetString();
+   if (action_id == kUserActionNext) {
++    // The renderer is not trusted to send well-formed arguments.
++    if (args.size() < 2 || !args[1].is_string()) {
++      LOG(ERROR) << "local-account: malformed 'next' action";
++      return;
++    }
+     CreateAccount(args[1].GetString());
+   } else if (action_id == kUserActionBack) {
+     exit_callback_.Run(Result::kBack);
+@@ -136,7 +141,12 @@ void LocalAccountScreen::CreateAccount(const std::string& name) {
+   // LoginPerformer -> AuthSessionAuthenticator -> cryptohome path. This screen
+   // is torn down with the rest of the sign-in UI when that succeeds, so there
+   // is no exit callback to run here.
+-  LoginDisplayHost::default_host()->CompleteLogin(user_context);
++  auto* host = LoginDisplayHost::default_host();
++  if (!host) {
++    LOG(ERROR) << "local-account: no LoginDisplayHost";
++    return;
++  }
++  host->CompleteLogin(user_context);
+ }
+ 
+ }  // namespace ash
+diff --git a/chrome/browser/ash/login/screens/osauth/recovery_eligibility_screen.cc b/chrome/browser/ash/login/screens/osauth/recovery_eligibility_screen.cc
+index 1117242698..a46d2c2945 100644
+--- a/chrome/browser/ash/login/screens/osauth/recovery_eligibility_screen.cc
++++ b/chrome/browser/ash/login/screens/osauth/recovery_eligibility_screen.cc
+@@ -19,6 +19,8 @@
+ #include "chromeos/ash/components/login/auth/public/user_context.h"
+ #include "chromeos/ash/components/login/auth/recovery/recovery_utils.h"
+ #include "chromeos/ash/components/osauth/public/auth_session_storage.h"
++#include "components/user_manager/user.h"
++#include "components/user_manager/user_manager.h"
+ 
+ namespace ash {
+ 
+@@ -84,6 +86,26 @@ void RecoveryEligibilityScreen::InspectContext(UserContext* user_context) {
+ }
+ 
+ void RecoveryEligibilityScreen::ProcessOptions() {
++  // colorburst: cryptohome recovery wraps the recovery secret against a
++  // Google-hosted service and is redeemed by reauthenticating with Gaia. A
++  // device-local account has no Gaia identity, so the factor simply cannot be
++  // configured -- RecoveryFactorEditor fails with code 50 and
++  // CryptohomeRecoverySetupScreen dead-ends on its error page, stranding the
++  // user in OOBE before the password is ever set.
++  //
++  // Note the user is opted in here by default and only *asked* later, on
++  // ConsolidatedConsentScreen, which does not run for a Gaia-less user. So
++  // without this the opt-in is both unconsented and unfulfillable.
++  const user_manager::User* active_user =
++      user_manager::UserManager::Get()->GetActiveUser();
++  if (!active_user || !active_user->HasGaiaAccount()) {
++    context()->recovery_setup.is_supported = false;
++    context()->recovery_setup.ask_about_recovery_consent = false;
++    context()->recovery_setup.recovery_factor_opted_in = false;
++    exit_callback_.Run(Result::PROCEED);
++    return;
++  }
++
+   if (recovery_supported_) {
+     context()->recovery_setup.is_supported = true;
+     // Don't ask about recovery consent for managed users - use the policy value
+diff --git a/chrome/browser/ash/login/wizard_controller.cc b/chrome/browser/ash/login/wizard_controller.cc
+index 60422ed662..3471c268b2 100644
+--- a/chrome/browser/ash/login/wizard_controller.cc
++++ b/chrome/browser/ash/login/wizard_controller.cc
+@@ -1540,7 +1540,7 @@ void WizardController::OnLocalAccountScreenExit(
+                LocalAccountScreen::GetResultString(result));
+   // The only way out of the local-account screen other than a successful
+   // login is Back, which returns to the setup-type chooser.
+-  ShowUserCreationScreen();
++  AdvanceToScreen(UserCreationView::kScreenId);
+ }
+ 
+ void WizardController::OnUserCreationScreenExit(
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+index 142d592b5b..609f0b394e 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+@@ -144,7 +144,9 @@ export class UserCreation extends UserCreationScreenElementBase {
+       },
+ 
+       /**
+-       * Whether software updaate feature is enabled.
++       * Whether Google Account sign-in is available at all. False when
++       * --disable-gaia-services is set, in which case the Google-account
++       * setup paths are hidden because they cannot complete.
+        */
+       isGaiaAvailable_: {
+         type: Boolean,
+@@ -154,6 +156,9 @@ export class UserCreation extends UserCreationScreenElementBase {
+         },
+       },
+ 
++      /**
++       * Whether software updaate feature is enabled.
++       */
+       isOobeSoftwareUpdateEnabled_: {
+         type: Boolean,
+         value() {
+diff --git a/components/session_manager/core/session_manager.cc b/components/session_manager/core/session_manager.cc
+index 6b1c5b86e4..659f8efe18 100644
+--- a/components/session_manager/core/session_manager.cc
++++ b/components/session_manager/core/session_manager.cc
+@@ -14,6 +14,7 @@
+ #include "components/session_manager/core/session.h"
+ #include "components/session_manager/core/session_manager_delegate.h"
+ #include "components/session_manager/core/session_manager_observer.h"
++#include "components/user_manager/user.h"
+ #include "components/user_manager/user_manager.h"
+ 
+ namespace session_manager {
+@@ -220,8 +221,16 @@ void SessionManager::CreateSessionInternal(const AccountId& user_account_id,
+   // TODO(crbug.com/278643115): This attribute looks like the one for Session
+   // rather than UserManager. Move the field.
+   // Note: For KioskApp user, this may be updated later in UserSessionManager.
++  // colorburst: ask the *type* whether this is the kind of user that has an
++  // onboarding flow, not whether this particular account happens to be backed
++  // by Gaia. The intent here is to exclude guest/kiosk sessions, which are not
++  // "new users" in the onboarding sense; a device-local account is a regular
++  // consumer user and must go through onboarding, because that is where
++  // PasswordSelectionScreen / LocalPasswordSetupScreen create its cryptohome
++  // knowledge factor. Without this it lands on the desktop with no password
++  // and no auth factor at all.
+   user_manager_->SetIsCurrentUserNew(
+-      (new_user && user.HasGaiaAccount()) ||
++      (new_user && user_manager::User::TypeHasGaiaAccount(user.GetType())) ||
+       user.GetType() == user_manager::UserType::kPublicAccount);
+ 
+   observers_.Notify(&SessionManagerObserver::OnSessionCreationStarted,
+diff --git a/components/user_manager/known_user.cc b/components/user_manager/known_user.cc
+index 9242cf8a2b..54b72033aa 100644
+--- a/components/user_manager/known_user.cc
++++ b/components/user_manager/known_user.cc
+@@ -406,6 +406,25 @@ AccountId KnownUser::GetAccountId(const std::string& user_email,
+       return AccountId::FromUserEmailGaiaId(sanitized_email,
+                                             GaiaId(*stored_gaia_id));
+     }
++
++    // colorburst: the caller often does not know the account type -- the
++    // login screen's user list (prefs::kRegularUsersPref) is a flat list of
++    // e-mail strings, so UserManagerImpl::ParseUserList() reconstructs every
++    // AccountId with AccountType::UNKNOWN. A Google account survives that
++    // because its gaia id is stored and recovered just above; a device-local
++    // account has no id, so without this it would silently come back as
++    // UNKNOWN on the second boot and the LOCAL type would only ever exist
++    // during the session that created it. Recover it from what UpdateId()
++    // persisted.
++    if (account_type == AccountType::UNKNOWN) {
++      if (const std::string* stored_type =
++              FindStringPath(account_id, kAccountTypeKey)) {
++        if (*stored_type ==
++            AccountId::AccountTypeToString(AccountType::LOCAL)) {
++          return AccountId::FromLocalUserEmail(sanitized_email);
++        }
++      }
++    }
+   }
+ 
+   switch (account_type) {

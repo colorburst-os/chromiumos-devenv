@@ -1,0 +1,1483 @@
+From 5097ef8609ab960cd63f451130f85afcc05d812c Mon Sep 17 00:00:00 2001
+From: colorburst <dev@colorburst.invalid>
+Date: Fri, 14 Aug 2026 22:25:57 -0700
+Subject: [PATCH 1/2] ChromeOS: a device-local account, and an OOBE entry point
+ for it
+
+Adds AccountType::LOCAL -- an account that exists only on this device,
+with no gaia id, no OAuth tokens and nothing on a server -- and a new
+OOBE screen that creates one, reachable from a third card on
+UserCreationScreen ("Without a Google Account").
+
+Design notes:
+
+* No new user_manager::UserType. A local account is an ordinary
+  kRegular user; what makes it local is its AccountId. Adding a UserType
+  value would have meant touching 26 non-test exhaustive switches, a
+  static_assert on kMaxValue, the policy proto and enums.xml. Instead
+  User::HasGaiaAccount() now asks whether the AccountId really is a
+  Google account, which is what its ~45 call sites actually mean and
+  fixes them all at once -- including the CHECK(!gaia_id.empty()) in
+  UserSessionManager::InitProfilePreferences that a non-Gaia AccountId
+  used to die on.
+
+* AccountType::LOCAL rather than reusing UNKNOWN, because UNKNOWN does
+  not round-trip: user_manager::StoreAccountId never writes it, and
+  LoadAccountId reads a missing account_type back as GOOGLE. A local
+  account would come back after a reboot as a Gaia user with an empty
+  gaia id.
+
+* The screen collects a name, not a password. CompleteLogin() with no
+  key takes AuthSessionAuthenticator's "new persistent user" path, which
+  creates and mounts the cryptohome without a knowledge factor on
+  purpose; upstream's PasswordSelectionScreen then sees no online
+  password, forces LOCAL_PASSWORD_FORCED, and LocalPasswordSetupScreen
+  writes the password.local-password auth factor. No cryptohome code and
+  no password code is added here, and auth_session_authenticator.cc is
+  untouched.
+
+Two upstream inconsistencies fixed along the way:
+
+* UserManagerImpl::SaveUserType() keyed prefs::kUserType by
+  GetAccountIdKey() unconditionally, which is NOTREACHED() (fatal, also
+  in official builds) for a non-Google AccountId. The reader of the same
+  pref already falls back to the e-mail; the writer now matches it.
+
+* The two places that rebuild the LoggedInUsers pref from
+  persisted_users_ filtered on HasGaiaAccount(), which would silently
+  drop a local user from the login screen's pod list. They now filter on
+  the user type, which is what list membership actually means.
+
+Finally, when --disable-gaia-services is set the setup-type screen hides
+the "You" and "A child" cards, since both lead to a Gaia webview that
+cannot load, and preselects the local card instead.
+---
+ ash/login/resources/ash_login_strings.grd     |  26 ++++
+ chrome/browser/ash/login/screens/BUILD.gn     |   2 +
+ .../ash/login/screens/local_account_screen.cc | 142 ++++++++++++++++++
+ .../ash/login/screens/local_account_screen.h  |  79 ++++++++++
+ .../ash/login/screens/user_creation_screen.cc |   7 +
+ .../ash/login/screens/user_creation_screen.h  |   2 +
+ chrome/browser/ash/login/wizard_controller.cc |  25 +++
+ chrome/browser/ash/login/wizard_controller.h  |   3 +
+ .../user_cloud_policy_manager_factory_ash.cc  |   1 +
+ .../browser/resources/chromeos/login/BUILD.gn |   1 +
+ .../resources/chromeos/login/screens.ts       |   2 +
+ .../login/screens/common/local_account.html   |  44 ++++++
+ .../login/screens/common/local_account.ts     | 136 +++++++++++++++++
+ .../login/screens/common/user_creation.html   |  22 ++-
+ .../login/screens/common/user_creation.ts     |  20 ++-
+ chrome/browser/ui/webui/ash/login/BUILD.gn    |   2 +
+ .../ash/login/local_account_screen_handler.cc |  41 +++++
+ .../ash/login/local_account_screen_handler.h  |  66 ++++++++
+ chrome/browser/ui/webui/ash/login/oobe_ui.cc  |   9 ++
+ .../ash/login/user_creation_screen_handler.cc |   4 +
+ .../components/cryptohome/cryptohome_util.cc  |   1 +
+ components/account_id/account_id.cc           |  31 ++++
+ components/account_id/account_id.h            |  14 ++
+ components/account_id/account_id_literal.h    |   7 +
+ components/account_id/mojom/account_id.mojom  |   2 +
+ .../mojom/account_id_mojom_traits.h           |  14 ++
+ components/user_manager/account_id_util.cc    |  10 ++
+ components/user_manager/known_user.cc         |  14 +-
+ components/user_manager/user.cc               |  14 +-
+ components/user_manager/user_manager_impl.cc  |  23 ++-
+ .../histograms/metadata/oobe/histograms.xml   |   4 +
+ 31 files changed, 758 insertions(+), 10 deletions(-)
+ create mode 100644 chrome/browser/ash/login/screens/local_account_screen.cc
+ create mode 100644 chrome/browser/ash/login/screens/local_account_screen.h
+ create mode 100644 chrome/browser/resources/chromeos/login/screens/common/local_account.html
+ create mode 100644 chrome/browser/resources/chromeos/login/screens/common/local_account.ts
+ create mode 100644 chrome/browser/ui/webui/ash/login/local_account_screen_handler.cc
+ create mode 100644 chrome/browser/ui/webui/ash/login/local_account_screen_handler.h
+
+diff --git a/ash/login/resources/ash_login_strings.grd b/ash/login/resources/ash_login_strings.grd
+index 168803548a..e81b55df26 100644
+--- a/ash/login/resources/ash_login_strings.grd
++++ b/ash/login/resources/ash_login_strings.grd
+@@ -2154,6 +2154,32 @@
+         Don't enroll
+       </message>
+ 
++      <!-- colorburst: strings for the OOBE local-account screen -->
++      <message name="IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_LABEL" desc="The label of the button that sets the device up with an account that exists only on this device, with no Google Account.">
++        Without a Google Account
++      </message>
++      <message name="IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_DESCRIPTION" desc="The description of the button that sets the device up with an account that exists only on this device.">
++        Create an account that stays on this device. No Google Account, no internet needed.
++      </message>
++      <message name="IDS_OOBE_LOCAL_ACCOUNT_TITLE" desc="Title of the screen that creates an account which exists only on this device.">
++        Create your account
++      </message>
++      <message name="IDS_OOBE_LOCAL_ACCOUNT_SUBTITLE" desc="Subtitle of the screen that creates an account which exists only on this device.">
++        This account lives on this device only. Nothing is sent to Google, and you can use it without an internet connection. You will choose a password next.
++      </message>
++      <message name="IDS_OOBE_LOCAL_ACCOUNT_NAME_LABEL" desc="Label of the text field where the user types the name of their device-local account.">
++        Name
++      </message>
++      <message name="IDS_OOBE_LOCAL_ACCOUNT_NAME_HINT" desc="Placeholder shown in the text field where the user types the name of their device-local account.">
++        e.g. alex
++      </message>
++      <message name="IDS_OOBE_LOCAL_ACCOUNT_NAME_INVALID" desc="Error shown when the typed account name cannot be used.">
++        Use 1 to 32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter.
++      </message>
++      <message name="IDS_OOBE_LOCAL_ACCOUNT_NAME_TAKEN" desc="Error shown when an account with the typed name already exists on the device.">
++        An account with this name already exists on this device.
++      </message>
++
+       <!-- Strings for the OOBE user creation screen -->
+       <message name="IDS_OOBE_USER_CREATION_TITLE" desc="Title of the screen which allows users to choose whom the device is set up for.">
+         Who's using this <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>?
+diff --git a/chrome/browser/ash/login/screens/BUILD.gn b/chrome/browser/ash/login/screens/BUILD.gn
+index d681d22039..f7cd3bfadf 100644
+--- a/chrome/browser/ash/login/screens/BUILD.gn
++++ b/chrome/browser/ash/login/screens/BUILD.gn
+@@ -76,6 +76,8 @@ static_library("screens") {
+     "gaia_screen.h",
+     "gemini_intro_screen.cc",
+     "gemini_intro_screen.h",
++    "local_account_screen.cc",
++    "local_account_screen.h",
+     "gesture_navigation_screen.cc",
+     "gesture_navigation_screen.h",
+     "guest_tos_screen.cc",
+diff --git a/chrome/browser/ash/login/screens/local_account_screen.cc b/chrome/browser/ash/login/screens/local_account_screen.cc
+new file mode 100644
+index 0000000000..d2ab66172d
+--- /dev/null
++++ b/chrome/browser/ash/login/screens/local_account_screen.cc
+@@ -0,0 +1,142 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ash/login/screens/local_account_screen.h"
++
++#include <string>
++
++#include "base/logging.h"
++#include "base/memory/weak_ptr.h"
++#include "base/strings/string_util.h"
++#include "base/values.h"
++#include "chrome/browser/ash/login/oobe_screen.h"
++#include "chrome/browser/ash/login/screens/base_screen.h"
++#include "chrome/browser/ash/login/wizard_context.h"
++#include "chrome/browser/ui/ash/login/login_display_host.h"
++#include "chrome/browser/ui/webui/ash/login/local_account_screen_handler.h"
++#include "chromeos/ash/components/login/auth/public/user_context.h"
++#include "components/account_id/account_id.h"
++#include "components/user_manager/user_manager.h"
++#include "components/user_manager/user_type.h"
++#include "google_apis/gaia/gaia_auth_util.h"
++
++namespace ash {
++namespace {
++
++constexpr char kUserActionBack[] = "back";
++constexpr char kUserActionNext[] = "next";
++
++// i18n keys, declared in LocalAccountScreenHandler.
++constexpr char kErrorInvalid[] = "localAccountNameInvalid";
++constexpr char kErrorTaken[] = "localAccountNameTaken";
++
++constexpr size_t kMaxNameLength = 32;
++
++}  // namespace
++
++// static
++const char LocalAccountScreen::kLocalAccountDomain[] = "localhost";
++
++// static
++std::string LocalAccountScreen::GetResultString(Result result) {
++  // LINT.IfChange(UsageMetrics)
++  switch (result) {
++    case Result::kBack:
++      return "Back";
++    case Result::kNotApplicable:
++      return BaseScreen::kNotApplicable;
++  }
++  // LINT.ThenChange(//tools/metrics/histograms/metadata/oobe/histograms.xml)
++}
++
++// static
++std::string LocalAccountScreen::CanonicalizeName(const std::string& name) {
++  const std::string trimmed =
++      base::ToLowerASCII(base::TrimWhitespaceASCII(name, base::TRIM_ALL));
++  if (trimmed.empty() || trimmed.size() > kMaxNameLength) {
++    return std::string();
++  }
++  // The name becomes the local part of an e-mail address and, through
++  // cryptohome, part of a path. Keep it to an unambiguous ASCII subset, and
++  // require it to start with a letter so it can never be confused with an
++  // account-id key ("g-...") or a reserved cryptohome user ("$guest").
++  if (!base::IsAsciiLower(trimmed[0])) {
++    return std::string();
++  }
++  for (char c : trimmed) {
++    if (!base::IsAsciiLower(c) && !base::IsAsciiDigit(c) && c != '.' &&
++        c != '-' && c != '_') {
++      return std::string();
++    }
++  }
++  return trimmed + "@" + kLocalAccountDomain;
++}
++
++LocalAccountScreen::LocalAccountScreen(
++    base::WeakPtr<LocalAccountScreenView> view,
++    const ScreenExitCallback& exit_callback)
++    : BaseScreen(LocalAccountScreenView::kScreenId, OobeScreenPriority::DEFAULT),
++      view_(std::move(view)),
++      exit_callback_(exit_callback) {}
++
++LocalAccountScreen::~LocalAccountScreen() = default;
++
++void LocalAccountScreen::ShowImpl() {
++  if (!view_) {
++    return;
++  }
++  view_->Show();
++}
++
++void LocalAccountScreen::HideImpl() {}
++
++void LocalAccountScreen::OnUserAction(const base::ListValue& args) {
++  const std::string& action_id = args[0].GetString();
++  if (action_id == kUserActionNext) {
++    CreateAccount(args[1].GetString());
++  } else if (action_id == kUserActionBack) {
++    exit_callback_.Run(Result::kBack);
++  } else {
++    BaseScreen::OnUserAction(args);
++  }
++}
++
++void LocalAccountScreen::CreateAccount(const std::string& name) {
++  const std::string user_email = CanonicalizeName(name);
++  if (user_email.empty()) {
++    if (view_) {
++      view_->ShowNameError(kErrorInvalid);
++    }
++    return;
++  }
++  // CanonicalizeName() already produces a canonical address, but AccountId's
++  // constructor DCHECKs against gaia's canonicalizer, so go through it.
++  const std::string canonical = gaia::CanonicalizeEmail(user_email);
++  const AccountId account_id = AccountId::FromLocalUserEmail(canonical);
++
++  auto* user_manager = user_manager::UserManager::Get();
++  if (user_manager && user_manager->FindUser(account_id)) {
++    if (view_) {
++      view_->ShowNameError(kErrorTaken);
++    }
++    return;
++  }
++
++  LOG(WARNING) << "Creating a device-local account for " << account_id;
++
++  UserContext user_context(user_manager::UserType::kRegular, account_id);
++  // Nothing about this account ever talks to Gaia, and there is no online
++  // password: PasswordSelectionScreen will therefore force the local-password
++  // flow, which is what creates the cryptohome knowledge factor.
++  user_context.SetIsUsingOAuth(false);
++  user_context.SetAuthFlow(UserContext::AUTH_FLOW_OFFLINE);
++
++  // Hands over to ExistingUserController, which runs the ordinary
++  // LoginPerformer -> AuthSessionAuthenticator -> cryptohome path. This screen
++  // is torn down with the rest of the sign-in UI when that succeeds, so there
++  // is no exit callback to run here.
++  LoginDisplayHost::default_host()->CompleteLogin(user_context);
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ash/login/screens/local_account_screen.h b/chrome/browser/ash/login/screens/local_account_screen.h
+new file mode 100644
+index 0000000000..9bc7e0f05e
+--- /dev/null
++++ b/chrome/browser/ash/login/screens/local_account_screen.h
+@@ -0,0 +1,79 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_ASH_LOGIN_SCREENS_LOCAL_ACCOUNT_SCREEN_H_
++#define CHROME_BROWSER_ASH_LOGIN_SCREENS_LOCAL_ACCOUNT_SCREEN_H_
++
++#include <string>
++
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "base/values.h"
++#include "chrome/browser/ash/login/screens/base_screen.h"
++#include "chrome/browser/ash/login/wizard_context.h"
++
++namespace ash {
++
++class LocalAccountScreenView;
++
++// Collects a name for an account that lives only on this device, mints a
++// non-Gaia AccountId from it, and hands it to the ordinary login path.
++//
++// It deliberately does *not* collect a password: a brand new persistent user
++// created through AuthSessionAuthenticator::CompleteLogin has its cryptohome
++// created without a knowledge factor, and the knowledge factor is set up
++// afterwards by upstream's own PasswordSelectionScreen /
++// LocalPasswordSetupScreen. Because a local account has no online password,
++// PasswordSelectionScreen resolves to LOCAL_PASSWORD_FORCED on its own and
++// the user goes straight to "create a password for this device".
++class LocalAccountScreen : public BaseScreen {
++ public:
++  using TView = LocalAccountScreenView;
++
++  enum class Result {
++    // The user backed out; go back to the user creation screen.
++    kBack,
++    kNotApplicable,
++  };
++
++  using ScreenExitCallback = base::RepeatingCallback<void(Result result)>;
++
++  LocalAccountScreen(base::WeakPtr<LocalAccountScreenView> view,
++                     const ScreenExitCallback& exit_callback);
++
++  LocalAccountScreen(const LocalAccountScreen&) = delete;
++  LocalAccountScreen& operator=(const LocalAccountScreen&) = delete;
++
++  ~LocalAccountScreen() override;
++
++  void set_exit_callback_for_testing(const ScreenExitCallback& exit_callback) {
++    exit_callback_ = exit_callback;
++  }
++
++  static std::string GetResultString(Result result);
++
++  // The e-mail realm used for accounts that exist only on this device.
++  // "localhost" is not resolvable and cannot be a real Gaia domain, so an
++  // address in it can never collide with a Google account.
++  static const char kLocalAccountDomain[];
++
++  // Returns the canonical account id string for `name`, or an empty string if
++  // `name` is not a usable account name.
++  static std::string CanonicalizeName(const std::string& name);
++
++ private:
++  // BaseScreen:
++  void ShowImpl() override;
++  void HideImpl() override;
++  void OnUserAction(const base::ListValue& args) override;
++
++  void CreateAccount(const std::string& name);
++
++  base::WeakPtr<LocalAccountScreenView> view_;
++  ScreenExitCallback exit_callback_;
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_ASH_LOGIN_SCREENS_LOCAL_ACCOUNT_SCREEN_H_
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.cc b/chrome/browser/ash/login/screens/user_creation_screen.cc
+index e49b9449d3..79ac5c77b8 100644
+--- a/chrome/browser/ash/login/screens/user_creation_screen.cc
++++ b/chrome/browser/ash/login/screens/user_creation_screen.cc
+@@ -22,6 +22,8 @@ namespace {
+ constexpr char kUserActionSignIn[] = "signin";
+ constexpr char kUserActionAddChild[] = "add-child";
+ constexpr char kUserActionCancel[] = "cancel";
++// colorburst: "set up without a Google Account".
++constexpr char kUserActionLocalAccount[] = "local-account";
+ 
+ // The following user actions are only possible when `OobeSoftwareUpdate` flag
+ // is enabled.
+@@ -54,6 +56,8 @@ std::string UserCreationScreen::GetResultString(Result result) {
+       return "KioskEnterpriseEnroll";
+     case Result::CANCEL:
+       return "Cancel";
++    case Result::LOCAL_ACCOUNT:
++      return "LocalAccount";
+     case Result::SIGNIN_SCHOOL:
+       return "SignInSchool";
+     case Result::SKIPPED:
+@@ -136,6 +140,9 @@ void UserCreationScreen::OnUserAction(const base::ListValue& args) {
+     RunExitCallback(Result::SIGNIN);
+   } else if (action_id == kUserActionAddChild) {
+     RunExitCallback(Result::ADD_CHILD);
++  } else if (action_id == kUserActionLocalAccount) {
++    context()->sign_in_as_child = false;
++    RunExitCallback(Result::LOCAL_ACCOUNT);
+   } else if (action_id == kUserActionCancel) {
+     context()->is_user_creation_enabled = false;
+     RunExitCallback(Result::CANCEL);
+diff --git a/chrome/browser/ash/login/screens/user_creation_screen.h b/chrome/browser/ash/login/screens/user_creation_screen.h
+index 6677e6b851..77346e83c5 100644
+--- a/chrome/browser/ash/login/screens/user_creation_screen.h
++++ b/chrome/browser/ash/login/screens/user_creation_screen.h
+@@ -31,6 +31,8 @@ class UserCreationScreen
+     ENTERPRISE_ENROLL_SHORTCUT,
+     CANCEL,
+     SKIPPED,
++    // colorburst: "set up without a Google Account".
++    LOCAL_ACCOUNT,
+     KIOSK_ENTERPRISE_ENROLL,
+     SIGNIN_SCHOOL,
+   };
+diff --git a/chrome/browser/ash/login/wizard_controller.cc b/chrome/browser/ash/login/wizard_controller.cc
+index 1d2aa22411..60422ed662 100644
+--- a/chrome/browser/ash/login/wizard_controller.cc
++++ b/chrome/browser/ash/login/wizard_controller.cc
+@@ -92,6 +92,7 @@
+ #include "chrome/browser/ash/login/screens/gaia_info_screen.h"
+ #include "chrome/browser/ash/login/screens/gaia_screen.h"
+ #include "chrome/browser/ash/login/screens/gemini_intro_screen.h"
++#include "chrome/browser/ash/login/screens/local_account_screen.h"
+ #include "chrome/browser/ash/login/screens/gesture_navigation_screen.h"
+ #include "chrome/browser/ash/login/screens/hardware_data_collection_screen.h"
+ #include "chrome/browser/ash/login/screens/hid_detection_screen.h"
+@@ -198,6 +199,7 @@
+ #include "chrome/browser/ui/webui/ash/login/gaia_info_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/gemini_intro_screen_handler.h"
++#include "chrome/browser/ui/webui/ash/login/local_account_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/gesture_navigation_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/guest_tos_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/hardware_data_collection_screen_handler.h"
+@@ -796,6 +798,11 @@ WizardController::CreateScreens() {
+       base::BindRepeating(&WizardController::OnGeminiIntroScreenExit,
+                           weak_factory_.GetWeakPtr())));
+ 
++  append(std::make_unique<LocalAccountScreen>(
++      oobe_ui->GetView<LocalAccountScreenHandler>()->AsWeakPtr(),
++      base::BindRepeating(&WizardController::OnLocalAccountScreenExit,
++                          weak_factory_.GetWeakPtr())));
++
+   append(std::make_unique<WrongHWIDScreen>(
+       oobe_ui->GetView<WrongHWIDScreenHandler>()->AsWeakPtr(),
+       base::BindRepeating(&WizardController::OnWrongHWIDScreenExit,
+@@ -1364,6 +1371,10 @@ void WizardController::ShowGeminiIntroScreen() {
+   SetCurrentScreen(GetScreen(GeminiIntroScreenView::kScreenId));
+ }
+ 
++void WizardController::ShowLocalAccountScreen() {
++  SetCurrentScreen(GetScreen(LocalAccountScreenView::kScreenId));
++}
++
+ void WizardController::ShowWrongHWIDScreen() {
+   SetCurrentScreen(GetScreen(WrongHWIDScreenView::kScreenId));
+ }
+@@ -1523,6 +1534,15 @@ void WizardController::ShowFjordImageDownloadScreen() {
+   SetCurrentScreen(GetScreen(FjordImageDownloadScreenView::kScreenId));
+ }
+ 
++void WizardController::OnLocalAccountScreenExit(
++    LocalAccountScreen::Result result) {
++  OnScreenExit(LocalAccountScreenView::kScreenId,
++               LocalAccountScreen::GetResultString(result));
++  // The only way out of the local-account screen other than a successful
++  // login is Back, which returns to the setup-type chooser.
++  ShowUserCreationScreen();
++}
++
+ void WizardController::OnUserCreationScreenExit(
+     UserCreationScreen::Result result) {
+   OnScreenExit(UserCreationView::kScreenId,
+@@ -1556,6 +1576,9 @@ void WizardController::OnUserCreationScreenExit(
+         AdvanceToScreen(GaiaView::kScreenId);
+       }
+       break;
++    case UserCreationScreen::Result::LOCAL_ACCOUNT:
++      ShowLocalAccountScreen();
++      break;
+     case UserCreationScreen::Result::ADD_CHILD:
+       MaybeAbortQuickStartFlow(
+           quick_start::QuickStartController::AbortFlowReason::ADD_CHILD);
+@@ -3651,6 +3674,8 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
+     ShowAiIntroScreen();
+   } else if (screen_id == GeminiIntroScreenView::kScreenId) {
+     ShowGeminiIntroScreen();
++  } else if (screen_id == LocalAccountScreenView::kScreenId) {
++    ShowLocalAccountScreen();
+   } else if (screen_id == WrongHWIDScreenView::kScreenId) {
+     ShowWrongHWIDScreen();
+   } else if (screen_id == AutoEnrollmentCheckScreenView::kScreenId) {
+diff --git a/chrome/browser/ash/login/wizard_controller.h b/chrome/browser/ash/login/wizard_controller.h
+index 3b80b2a1c9..2a984d0c13 100644
+--- a/chrome/browser/ash/login/wizard_controller.h
++++ b/chrome/browser/ash/login/wizard_controller.h
+@@ -45,6 +45,7 @@
+ #include "chrome/browser/ash/login/screens/gaia_info_screen.h"
+ #include "chrome/browser/ash/login/screens/gaia_screen.h"
+ #include "chrome/browser/ash/login/screens/gemini_intro_screen.h"
++#include "chrome/browser/ash/login/screens/local_account_screen.h"
+ #include "chrome/browser/ash/login/screens/gesture_navigation_screen.h"
+ #include "chrome/browser/ash/login/screens/guest_tos_screen.h"
+ #include "chrome/browser/ash/login/screens/hardware_data_collection_screen.h"
+@@ -363,6 +364,7 @@ class WizardController : public OobeUI::Observer {
+   void ShowAppDownloadingScreen();
+   void ShowAiIntroScreen();
+   void ShowGeminiIntroScreen();
++  void ShowLocalAccountScreen();
+   void ShowWrongHWIDScreen();
+   void ShowAutoEnrollmentCheckScreen();
+   void ShowHIDDetectionScreen();
+@@ -449,6 +451,7 @@ class WizardController : public OobeUI::Observer {
+   void OnDemoPreferencesScreenExit(DemoPreferencesScreen::Result result);
+   void OnDemoSetupScreenExit(DemoSetupScreen::Result result);
+   void OnUserCreationScreenExit(UserCreationScreen::Result result);
++  void OnLocalAccountScreenExit(LocalAccountScreen::Result result);
+   // Start of online authentication sub-group
+   void OnGaiaScreenExit(GaiaScreen::Result result);
+   void OnSamlConfirmPasswordScreenExit(
+diff --git a/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc b/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
+index d76a89d551..6404af9968 100644
+--- a/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
++++ b/chrome/browser/ash/policy/core/user_cloud_policy_manager_factory_ash.cc
+@@ -124,6 +124,7 @@ std::unique_ptr<UserCloudPolicyManagerAsh> CreateUserCloudPolicyManagerAsh(
+ 
+   switch (account_id.GetAccountType()) {
+     case AccountType::UNKNOWN:
++    case AccountType::LOCAL:
+     case AccountType::GOOGLE:
+       // TODO(tnagel): Return nullptr for unknown accounts once AccountId
+       // migration is finished.  (KioskChromeAppManager still needs to be
+diff --git a/chrome/browser/resources/chromeos/login/BUILD.gn b/chrome/browser/resources/chromeos/login/BUILD.gn
+index 3c374df625..d46c1486ab 100644
+--- a/chrome/browser/resources/chromeos/login/BUILD.gn
++++ b/chrome/browser/resources/chromeos/login/BUILD.gn
+@@ -103,6 +103,7 @@ build_webui("build") {
+     "screens/common/gaia_info.ts",
+     "screens/common/gaia_signin.ts",
+     "screens/common/gemini_intro.ts",
++    "screens/common/local_account.ts",
+     "screens/common/gesture_navigation.ts",
+     "screens/common/guest_tos.ts",
+     "screens/common/hw_data_collection.ts",
+diff --git a/chrome/browser/resources/chromeos/login/screens.ts b/chrome/browser/resources/chromeos/login/screens.ts
+index eb917e4b0d..27ce922e7e 100644
+--- a/chrome/browser/resources/chromeos/login/screens.ts
++++ b/chrome/browser/resources/chromeos/login/screens.ts
+@@ -22,6 +22,7 @@ import './screens/common/family_link_notice.js';
+ import './screens/common/gaia_info.js';
+ import './screens/common/gaia_signin.js';
+ import './screens/common/gemini_intro.js';
++import './screens/common/local_account.js';
+ import './screens/common/gesture_navigation.js';
+ import './screens/common/guest_tos.js';
+ import './screens/common/hw_data_collection.js';
+@@ -143,6 +144,7 @@ export const commonScreensList: OobeTypes.ScreensList = [
+   {tag: 'gesture-navigation-element', id: 'gesture-navigation'},
+   {tag: 'guest-tos-element', id: 'guest-tos'},
+   {tag: 'hw-data-collection-element', id: 'hw-data-collection'},
++  {tag: 'local-account-element', id: 'local-account'},
+   {
+     tag: 'local-password-setup-element',
+     id: 'local-password-setup',
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/local_account.html b/chrome/browser/resources/chromeos/login/screens/common/local_account.html
+new file mode 100644
+index 0000000000..c70be571d1
+--- /dev/null
++++ b/chrome/browser/resources/chromeos/login/screens/common/local_account.html
+@@ -0,0 +1,44 @@
++<!--
++Copyright 2026 The Chromium Authors
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<style include="oobe-dialog-host-styles cros-color-overrides">
++  #nameInput {
++    padding-top: 16px;
++    width: 100%;
++  }
++
++  :host-context(.jelly-enabled) cr-input#nameInput {
++    --cr-input-background-color: var(--cros-sys-input_field_on_shaded);
++  }
++</style>
++
++<oobe-adaptive-dialog role="dialog" id="localAccountDialog">
++  <iron-icon slot="icon" icon="oobe-32:avatar"></iron-icon>
++  <h1 slot="title">
++    [[i18nDynamic(locale, 'localAccountTitle')]]
++  </h1>
++  <div slot="subtitle">
++    [[i18nDynamic(locale, 'localAccountSubtitle')]]
++  </div>
++  <div slot="content" class="layout vertical">
++    <cr-input id="nameInput" value="{{name}}" invalid="{{nameInvalid}}"
++        required class="focus-on-show" disabled="[[disabled]]"
++        label="[[i18nDynamic(locale, 'localAccountNameLabel')]]"
++        placeholder="[[i18nDynamic(locale, 'localAccountNameHint')]]"
++        error-message="[[i18nDynamic(locale, errorKey)]]">
++    </cr-input>
++  </div>
++  <div slot="back-navigation">
++    <oobe-back-button id="backButton" on-click="onBackClicked"
++        disabled="[[disabled]]">
++    </oobe-back-button>
++  </div>
++  <div slot="bottom-buttons">
++    <oobe-next-button id="nextButton" on-click="onNextClicked" inverse
++        disabled="[[isNextDisabled(name, disabled)]]">
++    </oobe-next-button>
++  </div>
++</oobe-adaptive-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/local_account.ts b/chrome/browser/resources/chromeos/login/screens/common/local_account.ts
+new file mode 100644
+index 0000000000..af64d48981
+--- /dev/null
++++ b/chrome/browser/resources/chromeos/login/screens/common/local_account.ts
+@@ -0,0 +1,136 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++/**
++ * @fileoverview Polymer element for the OOBE screen that creates an account
++ * which exists only on this device. It collects a name; the password is set
++ * up afterwards by the ordinary LocalPasswordSetupScreen.
++ */
++
++import '//resources/ash/common/cr_elements/cros_color_overrides.css.js';
++import '//resources/ash/common/cr_elements/cr_input/cr_input.js';
++import '//resources/polymer/v3_0/iron-icon/iron-icon.js';
++import '../../components/oobe_icons.html.js';
++import '../../components/buttons/oobe_back_button.js';
++import '../../components/buttons/oobe_next_button.js';
++import '../../components/common_styles/oobe_common_styles.css.js';
++import '../../components/common_styles/oobe_dialog_host_styles.css.js';
++import '../../components/dialogs/oobe_adaptive_dialog.js';
++
++import {CrInputElement} from '//resources/ash/common/cr_elements/cr_input/cr_input.js';
++import {assert} from '//resources/js/assert.js';
++import type {PolymerElementProperties} from '//resources/polymer/v3_0/polymer/interfaces.js';
++import {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
++
++import {LoginScreenMixin} from '../../components/mixins/login_screen_mixin.js';
++import {OobeDialogHostMixin} from '../../components/mixins/oobe_dialog_host_mixin.js';
++import {OobeI18nMixin} from '../../components/mixins/oobe_i18n_mixin.js';
++import {addSubmitListener} from '../../login_ui_tools.js';
++
++import {getTemplate} from './local_account.html.js';
++
++const LocalAccountScreenElementBase =
++    OobeDialogHostMixin(LoginScreenMixin(OobeI18nMixin(PolymerElement)));
++
++enum UserAction {
++  BACK = 'back',
++  NEXT = 'next',
++}
++
++export class LocalAccountScreen extends LocalAccountScreenElementBase {
++  static get is() {
++    return 'local-account-element' as const;
++  }
++
++  static get template(): HTMLTemplateElement {
++    return getTemplate();
++  }
++
++  static get properties(): PolymerElementProperties {
++    return {
++      name: {
++        type: String,
++        value: '',
++      },
++
++      nameInvalid: {
++        type: Boolean,
++        value: false,
++      },
++
++      disabled: {
++        type: Boolean,
++        value: false,
++      },
++
++      // i18n key of the message shown under the field when it is invalid.
++      errorKey: {
++        type: String,
++        value: 'localAccountNameInvalid',
++      },
++    };
++  }
++
++  declare private name: string;
++  declare private nameInvalid: boolean;
++  declare private disabled: boolean;
++  declare private errorKey: string;
++
++  override get EXTERNAL_API(): string[] {
++    return ['showNameError'];
++  }
++
++  override ready(): void {
++    super.ready();
++    this.initializeLoginScreen('LocalAccountScreen');
++    const input = this.shadowRoot?.querySelector<CrInputElement>('#nameInput');
++    assert(input instanceof CrInputElement);
++    addSubmitListener(input, this.onNextClicked.bind(this));
++  }
++
++  override onBeforeShow(): void {
++    super.onBeforeShow();
++    this.name = '';
++    this.nameInvalid = false;
++    this.disabled = false;
++  }
++
++  /**
++   * Called from C++ when the name it was given is unusable. `errorKey` is an
++   * i18n key declared by LocalAccountScreenHandler.
++   */
++  showNameError(errorKey: string): void {
++    this.errorKey = errorKey;
++    this.nameInvalid = true;
++    this.disabled = false;
++  }
++
++  private isNextDisabled(name: string, disabled: boolean): boolean {
++    return disabled || name.trim().length === 0;
++  }
++
++  private onBackClicked(): void {
++    if (this.disabled) {
++      return;
++    }
++    this.userActed(UserAction.BACK);
++  }
++
++  private onNextClicked(): void {
++    if (this.disabled || this.name.trim().length === 0) {
++      return;
++    }
++    this.nameInvalid = false;
++    this.disabled = true;
++    this.userActed([UserAction.NEXT, this.name.trim()]);
++  }
++}
++
++declare global {
++  interface HTMLElementTagNameMap {
++    [LocalAccountScreen.is]: LocalAccountScreen;
++  }
++}
++
++customElements.define(LocalAccountScreen.is, LocalAccountScreen);
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+index 56a4169683..9e35fb91ef 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+@@ -38,7 +38,8 @@ found in the LICENSE file.
+   </div>
+   <div slot="content" class="layout vertical landscape-vertical-centered">
+     <cr-radio-group id="userType" selected="{{selectedUserType}}">
+-      <cr-card-radio-button id="selfButton" class="flex" name="self">
++      <cr-card-radio-button id="selfButton" class="flex" name="self"
++          hidden="[[!isGaiaAvailable_]]">
+         <div class="card-container">
+           <hd-iron-icon class="card-icon" icon1x="oobe-48:avatar"
+               icon2x="oobe-96:avatar">
+@@ -53,7 +54,8 @@ found in the LICENSE file.
+           </div>
+         </div>
+       </cr-card-radio-button>
+-      <cr-card-radio-button id="childButton" class="flex" name="child">
++      <cr-card-radio-button id="childButton" class="flex" name="child"
++          hidden="[[!isGaiaAvailable_]]">
+         <div class="card-container">
+           <hd-iron-icon class="card-icon" icon1x="oobe-48:child-user"
+             icon2x="oobe-96:child-user">
+@@ -68,6 +70,22 @@ found in the LICENSE file.
+           </div>
+         </div>
+       </cr-card-radio-button>
++      <cr-card-radio-button id="localAccountButton" class="flex" name="local">
++        <div class="card-container">
++          <hd-iron-icon class="card-icon" icon1x="oobe-48:avatar"
++              icon2x="oobe-96:avatar">
++          </hd-iron-icon>
++          <div class="card-content">
++            <div class="card-label">
++              [[i18nDynamic(locale, 'userCreationLocalAccountButtonTitle')]]
++            </div>
++            <div class="card-text">
++              [[i18nDynamic(locale,
++                  'userCreationLocalAccountButtonDescription')]]
++            </div>
++          </div>
++        </div>
++      </cr-card-radio-button>
+       <cr-card-radio-button id="enrollButton"
+           hidden="[[!isOobeSoftwareUpdateEnabled_]]"
+           class="flex" name="enroll">
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+index 98cfd9173c..142d592b5b 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+@@ -59,6 +59,8 @@ enum UserCreationUserType {
+   SELF = 'self',
+   CHILD = 'child',
+   ENROLL = 'enroll',
++  // colorburst: an account that exists only on this device.
++  LOCAL = 'local',
+ }
+ 
+ /**
+@@ -81,6 +83,7 @@ enum UserAction {
+   TRIAGE = 'triage',
+   CHILD_SETUP = 'child-setup',
+   CANCEL = 'cancel',
++  LOCAL_ACCOUNT = 'local-account',
+ }
+ 
+ /**
+@@ -143,6 +146,14 @@ export class UserCreation extends UserCreationScreenElementBase {
+       /**
+        * Whether software updaate feature is enabled.
+        */
++      isGaiaAvailable_: {
++        type: Boolean,
++        readOnly: true,
++        value() {
++          return loadTimeData.getBoolean('isGaiaAvailable');
++        },
++      },
++
+       isOobeSoftwareUpdateEnabled_: {
+         type: Boolean,
+         value() {
+@@ -166,6 +177,7 @@ export class UserCreation extends UserCreationScreenElementBase {
+   declare private titleKey_: string;
+   declare private subtitleKey_: string;
+   declare private isOobeLoaded_: boolean;
++  declare private readonly isGaiaAvailable_: boolean;
+   declare private readonly isOobeSoftwareUpdateEnabled_: boolean;
+ 
+   constructor() {
+@@ -216,7 +228,11 @@ export class UserCreation extends UserCreationScreenElementBase {
+       return;
+     }
+ 
+-    this.selectedUserType = UserCreationUserType.SELF;
++    // colorburst: with Gaia disabled the "You" card is hidden, so preselecting
++    // it would leave Next enabled with nothing visible chosen.
++    this.selectedUserType = this.isGaiaAvailable_ ?
++        UserCreationUserType.SELF :
++        UserCreationUserType.LOCAL;
+     if (!loadTimeData.getBoolean('isOobeFlow')) {
+       this.titleKey_ = 'userCreationAddPersonTitle';
+       this.subtitleKey_ = 'userCreationAddPersonSubtitle';
+@@ -306,6 +322,8 @@ export class UserCreation extends UserCreationScreenElementBase {
+         }
+       } else if (this.selectedUserType === UserCreationUserType.ENROLL) {
+         this.userActed(UserAction.TRIAGE);
++      } else if (this.selectedUserType === UserCreationUserType.LOCAL) {
++        this.userActed(UserAction.LOCAL_ACCOUNT);
+       }
+     }
+   }
+diff --git a/chrome/browser/ui/webui/ash/login/BUILD.gn b/chrome/browser/ui/webui/ash/login/BUILD.gn
+index fa279d3e3e..0d9db3a858 100644
+--- a/chrome/browser/ui/webui/ash/login/BUILD.gn
++++ b/chrome/browser/ui/webui/ash/login/BUILD.gn
+@@ -81,6 +81,8 @@ static_library("login") {
+     "gaia_screen_handler.h",
+     "gemini_intro_screen_handler.cc",
+     "gemini_intro_screen_handler.h",
++    "local_account_screen_handler.cc",
++    "local_account_screen_handler.h",
+     "gesture_navigation_screen_handler.cc",
+     "gesture_navigation_screen_handler.h",
+     "guest_tos_screen_handler.cc",
+diff --git a/chrome/browser/ui/webui/ash/login/local_account_screen_handler.cc b/chrome/browser/ui/webui/ash/login/local_account_screen_handler.cc
+new file mode 100644
+index 0000000000..7ebc641779
+--- /dev/null
++++ b/chrome/browser/ui/webui/ash/login/local_account_screen_handler.cc
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/ash/login/local_account_screen_handler.h"
++
++#include "ash/login/resources/grit/ash_login_strings.h"
++#include "base/values.h"
++#include "chrome/browser/ui/webui/ash/login/base_screen_handler.h"
++#include "components/login/localized_values_builder.h"
++
++namespace ash {
++
++LocalAccountScreenHandler::LocalAccountScreenHandler()
++    : BaseScreenHandler(kScreenId) {}
++
++LocalAccountScreenHandler::~LocalAccountScreenHandler() = default;
++
++void LocalAccountScreenHandler::DeclareLocalizedValues(
++    ::login::LocalizedValuesBuilder* builder) {
++  builder->Add("localAccountTitle", IDS_OOBE_LOCAL_ACCOUNT_TITLE);
++  builder->Add("localAccountSubtitle", IDS_OOBE_LOCAL_ACCOUNT_SUBTITLE);
++  builder->Add("localAccountNameLabel", IDS_OOBE_LOCAL_ACCOUNT_NAME_LABEL);
++  builder->Add("localAccountNameHint", IDS_OOBE_LOCAL_ACCOUNT_NAME_HINT);
++  builder->Add("localAccountNameInvalid", IDS_OOBE_LOCAL_ACCOUNT_NAME_INVALID);
++  builder->Add("localAccountNameTaken", IDS_OOBE_LOCAL_ACCOUNT_NAME_TAKEN);
++}
++
++void LocalAccountScreenHandler::Show() {
++  ShowInWebUI();
++}
++
++void LocalAccountScreenHandler::ShowNameError(const std::string& error_key) {
++  CallExternalAPI("showNameError", error_key);
++}
++
++base::WeakPtr<LocalAccountScreenView> LocalAccountScreenHandler::AsWeakPtr() {
++  return weak_ptr_factory_.GetWeakPtr();
++}
++
++}  // namespace ash
+diff --git a/chrome/browser/ui/webui/ash/login/local_account_screen_handler.h b/chrome/browser/ui/webui/ash/login/local_account_screen_handler.h
+new file mode 100644
+index 0000000000..5c4adbbfd4
+--- /dev/null
++++ b/chrome/browser/ui/webui/ash/login/local_account_screen_handler.h
+@@ -0,0 +1,66 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
++#define CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
++
++#include <string>
++
++#include "base/memory/weak_ptr.h"
++#include "chrome/browser/ash/login/oobe_screen.h"
++#include "chrome/browser/ui/webui/ash/login/base_screen_handler.h"
++#include "components/login/localized_values_builder.h"
++
++namespace ash {
++
++// Interface for dependency injection between LocalAccountScreen and its WebUI
++// representation.
++class LocalAccountScreenView {
++ public:
++  // LINT.IfChange(UsageMetrics)
++  inline constexpr static StaticOobeScreenId kScreenId{"local-account",
++                                                       "LocalAccountScreen"};
++  // LINT.ThenChange(//tools/metrics/histograms/metadata/oobe/histograms.xml)
++
++  virtual ~LocalAccountScreenView() = default;
++
++  // Shows the contents of the screen.
++  virtual void Show() = 0;
++
++  // Puts the name field back into an editable state and shows `error`, which
++  // is one of the i18n keys declared by DeclareLocalizedValues().
++  virtual void ShowNameError(const std::string& error_key) = 0;
++
++  virtual base::WeakPtr<LocalAccountScreenView> AsWeakPtr() = 0;
++};
++
++class LocalAccountScreenHandler : public BaseScreenHandler,
++                                  public LocalAccountScreenView {
++ public:
++  using TView = LocalAccountScreenView;
++
++  LocalAccountScreenHandler();
++
++  LocalAccountScreenHandler(const LocalAccountScreenHandler&) = delete;
++  LocalAccountScreenHandler& operator=(const LocalAccountScreenHandler&) =
++      delete;
++
++  ~LocalAccountScreenHandler() override;
++
++  // BaseScreenHandler:
++  void DeclareLocalizedValues(
++      ::login::LocalizedValuesBuilder* builder) override;
++
++  // LocalAccountScreenView:
++  void Show() override;
++  void ShowNameError(const std::string& error_key) override;
++  base::WeakPtr<LocalAccountScreenView> AsWeakPtr() override;
++
++ private:
++  base::WeakPtrFactory<LocalAccountScreenView> weak_ptr_factory_{this};
++};
++
++}  // namespace ash
++
++#endif  // CHROME_BROWSER_UI_WEBUI_ASH_LOGIN_LOCAL_ACCOUNT_SCREEN_HANDLER_H_
+diff --git a/chrome/browser/ui/webui/ash/login/oobe_ui.cc b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
+index 60dc9519b8..1cdfba07ed 100644
+--- a/chrome/browser/ui/webui/ash/login/oobe_ui.cc
++++ b/chrome/browser/ui/webui/ash/login/oobe_ui.cc
+@@ -85,6 +85,7 @@
+ #include "chrome/browser/ui/webui/ash/login/gaia_info_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/gemini_intro_screen_handler.h"
++#include "chrome/browser/ui/webui/ash/login/local_account_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/gesture_navigation_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/guest_tos_screen_handler.h"
+ #include "chrome/browser/ui/webui/ash/login/hardware_data_collection_screen_handler.h"
+@@ -350,6 +351,12 @@ void CreateAndAddOobeUIDataSource(Profile* profile,
+   source->AddBoolean("isOobeSoftwareUpdateEnabled",
+                      features::IsOobeSoftwareUpdateEnabled());
+ 
++  // colorburst: when --disable-gaia-services is set there is no point offering
++  // the Google-account setup paths -- they cannot complete. The setup-type
++  // screen hides them and leaves the device-local account.
++  source->AddBoolean("isGaiaAvailable",
++                     !ash::switches::IsGaiaServicesDisabled());
++
+   source->AddBoolean("isSplitModifierKeyboardInfoEnabled",
+                      features::IsOobeSplitModifierKeyboardInfoEnabled());
+ 
+@@ -472,6 +479,8 @@ void OobeUI::ConfigureOobeDisplay() {
+   }
+   AddScreenHandler(std::make_unique<GeminiIntroScreenHandler>());
+ 
++  AddScreenHandler(std::make_unique<LocalAccountScreenHandler>());
++
+   AddScreenHandler(std::make_unique<DemoSetupScreenHandler>());
+ 
+   AddScreenHandler(std::make_unique<FamilyLinkNoticeScreenHandler>());
+diff --git a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
+index 7c13600377..277401bbf4 100644
+--- a/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
++++ b/chrome/browser/ui/webui/ash/login/user_creation_screen_handler.cc
+@@ -52,6 +52,10 @@ void UserCreationScreenHandler::DeclareLocalizedValues(
+                IDS_OOBE_USER_CREATION_CHILD_USE_BUTTON_LABEL);
+   builder->Add("userCreationChildButtonDescription",
+                IDS_OOBE_USER_CREATION_CHILD_USE_BUTTON_DESCRIPTION);
++  builder->Add("userCreationLocalAccountButtonTitle",
++               IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_LABEL);
++  builder->Add("userCreationLocalAccountButtonDescription",
++               IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_DESCRIPTION);
+   builder->Add("userCreationEnrollButtonTitle",
+                IDS_OOBE_USER_CREATION_ENROLL_USE_BUTTON_LABEL);
+   builder->Add("userCreationEnrollButtonDescription",
+diff --git a/chromeos/ash/components/cryptohome/cryptohome_util.cc b/chromeos/ash/components/cryptohome/cryptohome_util.cc
+index 7cf7c88368..fa519c564b 100644
+--- a/chromeos/ash/components/cryptohome/cryptohome_util.cc
++++ b/chromeos/ash/components/cryptohome/cryptohome_util.cc
+@@ -14,6 +14,7 @@ const std::string GetCryptohomeId(const AccountId& account_id) {
+   switch (account_id.GetAccountType()) {
+     case AccountType::UNKNOWN:
+     case AccountType::GOOGLE:
++    case AccountType::LOCAL:
+       return account_id.GetUserEmail();
+   }
+ }
+diff --git a/components/account_id/account_id.cc b/components/account_id/account_id.cc
+index 0c7a4e8696..8127f15def 100644
+--- a/components/account_id/account_id.cc
++++ b/components/account_id/account_id.cc
+@@ -29,6 +29,8 @@ constexpr char kAccountTypeKey[] = "account_type";
+ // Serialization values for account type.
+ constexpr char kGoogle[] = "google";
+ constexpr char kUnknown[] = "unknown";
++// colorburst: device-local account, see AccountType::LOCAL.
++constexpr char kLocal[] = "local";
+ 
+ // Prefix for GetAccountIdKey().
+ constexpr char kKeyGaiaIdPrefix[] = "g-";
+@@ -45,6 +47,7 @@ AccountId::AccountId(std::string_view user_email,
+ 
+   switch (account_type_) {
+     case AccountType::UNKNOWN:
++    case AccountType::LOCAL:
+       CHECK(gaia_id_.empty());
+       break;
+     case AccountType::GOOGLE:
+@@ -77,6 +80,10 @@ bool AccountId::operator==(const AccountId& other) const {
+   switch (account_type_) {
+     case AccountType::UNKNOWN:
+       NOTREACHED() << "Unknown account type";
++    case AccountType::LOCAL:
++      // A device-local account has no id; the canonical e-mail is the
++      // identity.
++      return user_email_ == other.user_email_;
+     case AccountType::GOOGLE:
+       return (gaia_id_ == other.gaia_id_ && user_email_ == other.user_email_) ||
+              (!gaia_id_.empty() && gaia_id_ == other.gaia_id_) ||
+@@ -101,6 +108,7 @@ bool AccountId::is_valid() const {
+       // when this bug is fixed.
+       return !user_email_.empty();
+     case AccountType::UNKNOWN:
++    case AccountType::LOCAL:
+       return gaia_id_.empty() && !user_email_.empty();
+   }
+   NOTREACHED();
+@@ -130,6 +138,9 @@ const std::string& AccountId::GetUserEmail() const {
+ bool AccountId::HasAccountIdKey() const {
+   switch (account_type_) {
+     case AccountType::UNKNOWN:
++    case AccountType::LOCAL:
++      // No stable key beyond the e-mail. Callers already fall back to
++      // GetUserEmail() when this is false.
+       return false;
+     case AccountType::GOOGLE:
+       return !gaia_id_.empty();
+@@ -141,6 +152,8 @@ const std::string AccountId::GetAccountIdKey() const {
+   switch (GetAccountType()) {
+     case AccountType::UNKNOWN:
+       NOTREACHED() << "Unknown account type";
++    case AccountType::LOCAL:
++      NOTREACHED() << "Local accounts have no account id key";
+     case AccountType::GOOGLE:
+ #ifdef NDEBUG
+       if (gaia_id_.empty()) {
+@@ -181,6 +194,12 @@ AccountId AccountId::FromUserEmailGaiaId(std::string_view email,
+   return AccountId(email, AccountType::GOOGLE, gaia_id);
+ }
+ 
++// static
++AccountId AccountId::FromLocalUserEmail(std::string_view email) {
++  DCHECK(!email.empty());
++  return AccountId(email, AccountType::LOCAL, GaiaId());
++}
++
+ // static
+ AccountType AccountId::StringToAccountType(
+     std::string_view account_type_string) {
+@@ -190,6 +209,9 @@ AccountType AccountId::StringToAccountType(
+   if (account_type_string == kUnknown) {
+     return AccountType::UNKNOWN;
+   }
++  if (account_type_string == kLocal) {
++    return AccountType::LOCAL;
++  }
+   NOTREACHED() << "Unknown account type " << account_type_string;
+ }
+ 
+@@ -200,6 +222,8 @@ const char* AccountId::AccountTypeToString(AccountType account_type) {
+       return kGoogle;
+     case AccountType::UNKNOWN:
+       return kUnknown;
++    case AccountType::LOCAL:
++      return kLocal;
+   }
+   return "";
+ }
+@@ -211,6 +235,7 @@ std::string AccountId::Serialize() const {
+       value.Set(kGaiaIdKey, gaia_id_.ToString());
+       break;
+     case AccountType::UNKNOWN:
++    case AccountType::LOCAL:
+       break;
+   }
+   value.Set(kAccountTypeKey, AccountTypeToString(GetAccountType()));
+@@ -257,6 +282,12 @@ std::optional<AccountId> AccountId::Deserialize(std::string_view serialized) {
+         return std::nullopt;
+       }
+       return FromUserEmail(*user_email);
++
++    case AccountType::LOCAL:
++      if (!user_email) {
++        return std::nullopt;
++      }
++      return FromLocalUserEmail(*user_email);
+   }
+   return std::nullopt;
+ }
+diff --git a/components/account_id/account_id.h b/components/account_id/account_id.h
+index 09730a67f5..4c3456f1a8 100644
+--- a/components/account_id/account_id.h
++++ b/components/account_id/account_id.h
+@@ -24,6 +24,17 @@ enum class AccountType {
+   GOOGLE,
+ 
+   // ACTIVE_DIRECTORY account type was deprecated.
++
++  // colorburst: an account that exists only on this device. It has no Gaia
++  // id, no OAuth tokens and nothing on a server; the canonical e-mail (of the
++  // form "<name>@localhost") is the whole identity, and cryptohome keys off
++  // exactly that, as it already does for every other account type.
++  //
++  // Deliberately distinct from UNKNOWN. UNKNOWN means "we have not been told
++  // yet": it is a wildcard when matching serialized accounts, it is never
++  // written out by user_manager::StoreAccountId, and an entry with no
++  // account_type is read back as GOOGLE. LOCAL round-trips as itself.
++  LOCAL,
+ };
+ 
+ class AccountIdLiteral;
+@@ -83,6 +94,9 @@ class COMPONENT_EXPORT(COMPONENTS_ACCOUNT_ID) AccountId {
+   // AccountId with GOOGLE AccountType;
+   static AccountId FromUserEmailGaiaId(std::string_view user_email,
+                                        const GaiaId& gaia_id);
++  // colorburst: AccountId with LOCAL AccountType. `user_email` must be
++  // canonical and is the whole identity; there is no separate id.
++  static AccountId FromLocalUserEmail(std::string_view user_email);
+ 
+   // Translation functions between AccountType and std::string. Used for
+   // serialization.
+diff --git a/components/account_id/account_id_literal.h b/components/account_id/account_id_literal.h
+index 9a4e9f1754..ff115e2e36 100644
+--- a/components/account_id/account_id_literal.h
++++ b/components/account_id/account_id_literal.h
+@@ -25,6 +25,11 @@ class AccountIdLiteral {
+       const GaiaId::Literal gaia_id) {
+     return AccountIdLiteral(AccountType::GOOGLE, user_email, gaia_id);
+   }
++  static constexpr AccountIdLiteral FromLocalUserEmail(
++      std::string_view user_email) {
++    return AccountIdLiteral(AccountType::LOCAL, user_email,
++                            GaiaId::Literal(""));
++  }
+ 
+   const std::string_view GetUserEmail() const { return user_email_; }
+   const GaiaId::Literal GetGaiaId() const { return gaia_id_; }
+@@ -37,6 +42,8 @@ class AccountIdLiteral {
+         return AccountId::FromUserEmail(user_email_);
+       case AccountType::GOOGLE:
+         return AccountId::FromUserEmailGaiaId(user_email_, gaia_id_);
++      case AccountType::LOCAL:
++        return AccountId::FromLocalUserEmail(user_email_);
+     }
+   }
+ 
+diff --git a/components/account_id/mojom/account_id.mojom b/components/account_id/mojom/account_id.mojom
+index b4b81ee92d..d8701f9c6b 100644
+--- a/components/account_id/mojom/account_id.mojom
++++ b/components/account_id/mojom/account_id.mojom
+@@ -9,6 +9,8 @@ enum AccountType {
+   UNKNOWN,
+   GOOGLE,
+   // ACTIVE_DIRECTORY account type was deprecated.
++  // colorburst: device-local account, no Gaia id.
++  LOCAL,
+ };
+ 
+ // Mirror of AccountId in Mojo.
+diff --git a/components/account_id/mojom/account_id_mojom_traits.h b/components/account_id/mojom/account_id_mojom_traits.h
+index 8eb2e898a9..9ba7d8f7f8 100644
+--- a/components/account_id/mojom/account_id_mojom_traits.h
++++ b/components/account_id/mojom/account_id_mojom_traits.h
+@@ -22,6 +22,8 @@ struct EnumTraits<signin::mojom::AccountType, AccountType> {
+         return signin::mojom::AccountType::UNKNOWN;
+       case AccountType::GOOGLE:
+         return signin::mojom::AccountType::GOOGLE;
++      case AccountType::LOCAL:
++        return signin::mojom::AccountType::LOCAL;
+     }
+     NOTREACHED();
+   }
+@@ -32,6 +34,8 @@ struct EnumTraits<signin::mojom::AccountType, AccountType> {
+         return AccountType::UNKNOWN;
+       case signin::mojom::AccountType::GOOGLE:
+         return AccountType::GOOGLE;
++      case signin::mojom::AccountType::LOCAL:
++        return AccountType::LOCAL;
+     }
+     NOTREACHED();
+   }
+@@ -47,8 +51,10 @@ struct StructTraits<signin::mojom::AccountIdDataView, AccountId> {
+       case AccountType::GOOGLE:
+         return r.GetGaiaId().ToString();
+       case AccountType::UNKNOWN:
++      case AccountType::LOCAL:
+         // UNKNOWN type is used for users that have only email (e.g. in tests
+         // or legacy users that have not run through migration code).
++        // LOCAL accounts likewise have no id beyond the e-mail.
+         // Return an empty string for such accounts.
+         return std::string();
+     }
+@@ -79,6 +85,14 @@ struct StructTraits<signin::mojom::AccountIdDataView, AccountId> {
+ 
+         *out = AccountId::FromUserEmail(user_email);
+         break;
++      case AccountType::LOCAL:
++        // The e-mail is the whole identity of a device-local account.
++        if (user_email.empty()) {
++          return false;
++        }
++
++        *out = AccountId::FromLocalUserEmail(user_email);
++        break;
+     }
+ 
+     return out->is_valid();
+diff --git a/components/user_manager/account_id_util.cc b/components/user_manager/account_id_util.cc
+index 29b7ea6e7d..1cfa54ebbf 100644
+--- a/components/user_manager/account_id_util.cc
++++ b/components/user_manager/account_id_util.cc
+@@ -36,6 +36,11 @@ std::optional<AccountId> LoadAccountId(const base::DictValue& dict) {
+             gaia_id ? GaiaId(*gaia_id) : GaiaId());
+       }
+       break;
++    case AccountType::LOCAL:
++      if (email) {
++        return AccountId::FromLocalUserEmail(*email);
++      }
++      break;
+     default:
+       NOTREACHED() << "Unknown account type";
+   }
+@@ -61,6 +66,7 @@ bool AccountIdMatches(const AccountId& account_id,
+       }
+       break;
+     }
++    case AccountType::LOCAL:
+     case AccountType::UNKNOWN: {
+       break;
+     }
+@@ -85,6 +91,10 @@ void StoreAccountId(const AccountId& account_id, base::DictValue& dict) {
+         dict.Set(kGAIAIdKey, account_id.GetGaiaId().ToString());
+       }
+       break;
++    case AccountType::LOCAL:
++      // Nothing to store beyond the e-mail, but the account type itself must
++      // be written: see KnownUser::UpdateId.
++      break;
+     case AccountType::UNKNOWN:
+       return;
+   }
+diff --git a/components/user_manager/known_user.cc b/components/user_manager/known_user.cc
+index cd8df82b78..9242cf8a2b 100644
+--- a/components/user_manager/known_user.cc
++++ b/components/user_manager/known_user.cc
+@@ -367,7 +367,10 @@ void KnownUser::RemovePref(const AccountId& account_id,
+ AccountId KnownUser::GetAccountId(const std::string& user_email,
+                                   const std::string& id,
+                                   const AccountType& account_type) const {
+-  DCHECK((id.empty() && account_type == AccountType::UNKNOWN) ||
++  // A device-local account has no id at all: the canonical e-mail is the
++  // whole identity. Every other non-UNKNOWN type carries one.
++  DCHECK((id.empty() && (account_type == AccountType::UNKNOWN ||
++                         account_type == AccountType::LOCAL)) ||
+          (!id.empty() && account_type != AccountType::UNKNOWN));
+   // In tests empty accounts are possible.
+   if (user_email.empty() && id.empty() &&
+@@ -410,6 +413,8 @@ AccountId KnownUser::GetAccountId(const std::string& user_email,
+       return AccountId::FromUserEmailGaiaId(sanitized_email, GaiaId(id));
+     case AccountType::UNKNOWN:
+       return AccountId::FromUserEmail(sanitized_email);
++    case AccountType::LOCAL:
++      return AccountId::FromLocalUserEmail(sanitized_email);
+   }
+   NOTREACHED();
+ }
+@@ -477,6 +482,13 @@ void KnownUser::UpdateId(const AccountId& account_id) {
+     case AccountType::GOOGLE:
+       SetStringPref(account_id, kGAIAIdKey, account_id.GetGaiaId().ToString());
+       break;
++    case AccountType::LOCAL:
++      // No id to store, but the account type itself must be persisted:
++      // an entry with no account_type is read back as GOOGLE
++      // (user_manager::LoadAccountId), which for a local account means a
++      // Gaia user with an empty gaia id -- and that CHECK-fails later in
++      // UserSessionManager::InitProfilePreferences.
++      break;
+     case AccountType::UNKNOWN:
+       return;
+   }
+diff --git a/components/user_manager/user.cc b/components/user_manager/user.cc
+index ca82389c2c..d286e7924e 100644
+--- a/components/user_manager/user.cc
++++ b/components/user_manager/user.cc
+@@ -129,7 +129,19 @@ const AccountId& User::GetAccountId() const {
+ }
+ 
+ bool User::HasGaiaAccount() const {
+-  return TypeHasGaiaAccount(GetType());
++  // colorburst: a regular user is not necessarily backed by Gaia. A local
++  // account created through the OOBE "set up without a Google Account" flow is
++  // an ordinary UserType::kRegular user whose AccountId carries
++  // AccountType::UNKNOWN and no gaia id. Asking the type alone is not enough:
++  // callers use the answer to decide whether to seed the IdentityManager, set
++  // a primary account, fetch OAuth2 tokens, apply Gaia user allowlists and so
++  // on, all of which need an actual gaia id and CHECK-fail without one.
++  //
++  // Requiring the AccountId to really be a Google account makes every one of
++  // those call sites do the right thing for a local account without inventing
++  // a new UserType, and is closer to what the method name claims anyway.
++  return TypeHasGaiaAccount(GetType()) &&
++         GetAccountId().GetAccountType() == AccountType::GOOGLE;
+ }
+ 
+ bool User::IsChild() const {
+diff --git a/components/user_manager/user_manager_impl.cc b/components/user_manager/user_manager_impl.cc
+index c872d1b956..a6d90462a7 100644
+--- a/components/user_manager/user_manager_impl.cc
++++ b/components/user_manager/user_manager_impl.cc
+@@ -372,7 +372,10 @@ void UserManagerImpl::OnPrimaryUserLoggedIn(User& user) {
+                                               prefs::kRegularUsersPref);
+       prefs_users_update->clear();
+       for (const User* u : persisted_users_) {
+-        if (u->HasGaiaAccount()) {
++        // Membership of this list is about "is this a persisted human user",
++        // which is a property of the type. Filtering on HasGaiaAccount()
++        // would silently drop device-local accounts from the login screen.
++        if (User::TypeHasGaiaAccount(u->GetType())) {
+           prefs_users_update->Append(u->GetAccountId().GetUserEmail());
+         }
+       }
+@@ -818,7 +821,15 @@ void UserManagerImpl::SaveUserType(const User* user) {
+   }
+ 
+   ScopedDictPrefUpdate user_type_update(local_state_.get(), prefs::kUserType);
+-  user_type_update->Set(user->GetAccountId().GetAccountIdKey(),
++  // Use the same key the reader uses: GetStoredUserType() above falls back to
++  // the e-mail when the AccountId has no account-id key, but this writer used
++  // to call GetAccountIdKey() unconditionally, which NOTREACHEDs (fatal, also
++  // in official builds) for AccountType::UNKNOWN. That is the crash a
++  // genuinely non-Gaia AccountId hits on its first login.
++  const AccountId& account_id = user->GetAccountId();
++  user_type_update->Set(account_id.HasAccountIdKey()
++                            ? account_id.GetAccountIdKey()
++                            : account_id.GetUserEmail(),
+                         static_cast<int>(user->GetType()));
+   local_state_->CommitPendingWrite();
+ }
+@@ -1231,8 +1242,10 @@ bool UserManagerImpl::IsDeviceLocalAccountMarkedForRemoval(
+ }
+ 
+ bool UserManagerImpl::CanUserBeRemoved(const User* user) const {
+-  // Only regular users are allowed to be manually removed.
+-  if (!user || !user->HasGaiaAccount()) {
++  // Only regular users are allowed to be manually removed. Device-local
++  // accounts are regular users too, so ask about the type rather than about
++  // whether the account happens to be backed by Gaia.
++  if (!user || !User::TypeHasGaiaAccount(user->GetType())) {
+     return false;
+   }
+ 
+@@ -1627,7 +1640,7 @@ User* UserManagerImpl::RemoveRegularOrSupervisedUserFromList(
+       user = *it;
+       it = persisted_users_.erase(it);
+     } else {
+-      if ((*it)->HasGaiaAccount()) {
++      if (User::TypeHasGaiaAccount((*it)->GetType())) {
+         const std::string user_email = (*it)->GetAccountId().GetUserEmail();
+         prefs_users_update->Append(user_email);
+       }
+diff --git a/tools/metrics/histograms/metadata/oobe/histograms.xml b/tools/metrics/histograms/metadata/oobe/histograms.xml
+index f33355c594..6d30788dc4 100644
+--- a/tools/metrics/histograms/metadata/oobe/histograms.xml
++++ b/tools/metrics/histograms/metadata/oobe/histograms.xml
+@@ -56,6 +56,7 @@ chromium-metrics-reviews@google.com.
+   <variant name="Gesture-navigation"/>
+   <variant name="Guest-tos"/>
+   <variant name="Hw-data-collection"/>
++  <variant name="Local-account"/>
+   <variant name="Local-data-loss-warning"/>
+   <variant name="Local-password-setup"/>
+   <variant name="Local-state-error"/>
+@@ -150,6 +151,7 @@ chromium-metrics-reviews@google.com.
+   <variant name="Gesture-navigation"/>
+   <variant name="Guest-tos"/>
+   <variant name="Hid-detection"/>
++  <variant name="Local-account"/>
+   <variant name="Hw-data-collection"/>
+   <variant name="Local-data-loss-warning"/>
+   <variant name="Local-password-setup"/>
+@@ -414,7 +416,9 @@ chromium-metrics-reviews@google.com.
+   <variant name="Touchpad-scroll.Next"/>
+   <variant name="User-allowlist-check-screen.Retry"/>
+   <variant name="User-creation.AddChild"/>
++  <variant name="Local-account.Back"/>
+   <variant name="User-creation.Cancel"/>
++  <variant name="User-creation.LocalAccount"/>
+   <variant name="User-creation.EnterpriseEnrollShortcut"/>
+   <variant name="User-creation.EnterpriseEnrollTriage"/>
+   <variant name="User-creation.KioskEnterpriseEnroll"/>

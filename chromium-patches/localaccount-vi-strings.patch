@@ -1,0 +1,35 @@
+From 0ebb681b6e75974a5053fd2f724e82708de4beb6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 16:33:38 -0700
+Subject: [PATCH] Vietnamese translations for the local-account OOBE strings
+
+The eight fork-added strings (user-creation card, local-account screen)
+had IDS_ ids but no vi entries, so a Vietnamese session showed them in
+English. Fingerprints computed with the in-tree grit against the
+current grd wording; register matched to neighboring OOBE strings.
+---
+ ash/login/resources/translations/ash_login_strings_vi.xtb | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/ash/login/resources/translations/ash_login_strings_vi.xtb b/ash/login/resources/translations/ash_login_strings_vi.xtb
+index 948d35bed1..5dc50f394c 100644
+--- a/ash/login/resources/translations/ash_login_strings_vi.xtb
++++ b/ash/login/resources/translations/ash_login_strings_vi.xtb
+@@ -782,4 +782,12 @@
+ <translation id="954749761428814584">Ngôn ngữ và phương thức nhập</translation>
+ <translation id="960987915827980018">Còn khoảng 1 giờ</translation>
+ <translation id="995420352808264005">Chọn loại đăng ký thiết bị</translation>
++<translation id="7087478302767909432">Tạo tài khoản cục bộ</translation>
++<translation id="8746665825416822256">Tài khoản chỉ lưu trên máy tính này. Bạn không cần kết nối Internet.</translation>
++<translation id="6624553071240278643">Tạo tài khoản của bạn</translation>
++<translation id="4082021039066820513">Tài khoản này chỉ tồn tại trên máy tính này và hoạt động mà không cần kết nối Internet. Tiếp theo, bạn sẽ chọn mật khẩu.</translation>
++<translation id="5327248766486351172">Tên</translation>
++<translation id="2790216663839525320">ví dụ: alex</translation>
++<translation id="1092001604295651667">Hãy dùng từ 1 đến 32 ký tự gồm chữ thường, chữ số, dấu chấm, dấu gạch ngang hoặc dấu gạch dưới, bắt đầu bằng một chữ cái.</translation>
++<translation id="1971956025567421347">Tài khoản có tên này đã tồn tại trên thiết bị này.</translation>
+ </translationbundle>
+\ No newline at end of file
+-- 
+2.53.0
+
