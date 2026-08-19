@@ -1,0 +1,967 @@
+From e06f8a0ec3f09bc5f7ca0753b776120555276bbe Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Tue, 18 Aug 2026 02:28:31 -0700
+Subject: [PATCH] Gallery: a real viewer; Apps & games: gone, WebUI included
+
+Two launcher apps that did nothing.
+
+Gallery. Upstream builds this app from an internal CIPD bundle
+(enable_cros_media_app = is_chromeos && is_chrome_branded, resources/prod
+via DEPS with checkout_src_internal); every other build gets a mock whose
+zero state is a bare <img> with no src. That is the blank window on
+colorburst, and we cannot fetch the internal bundle.
+
+So the file that was the mock is now a small real viewer against the same
+ClientApi the trusted context talks to: images with fit/zoom/rotate,
+drag-pan and wheel zoom, video and audio with controls, RAW via the
+delegate's preview extractor, prev/next across the handed-over file list
+with a counter, and honest empty and error states. It carries its own
+Vietnamese strings because the untrusted guest cannot reach the browser's
+string bundle. It does not pretend to edit, annotate or render PDFs --
+those are the internal parts -- and says so instead. The crash-reporting
+hooks that phoned Google are replaced by console logging.
+
+Verified in a VM against the running app: our element renders with its app
+bar; a loaded PNG decodes and displays with the filename shown; zoom grows
+the image; rotate applies rotate(90deg); fit restores; navigation controls
+hide for a single file.
+
+Apps & games. MallSystemAppDelegate::IsAppEnabled() now returns false, so
+SystemWebAppManager never installs it -- no launcher icon, no shelf pin.
+Upstream already does this for Flex via IsRevenBranding(), which colorburst
+does not set.
+
+That alone leaves chrome://mall reachable by URL, and the VM showed the
+page immediately embedding https://discover.apps.chrome/ with the board,
+OS and Chrome versions, hwid and locale in the query string. For a build
+whose point is that it does not talk to Google, hiding the icon is not
+enough, so the WebUI registration is dropped too and the host no longer
+exists.
+
+
+
+---
+ .../resources/mock/js/app_main.ts             | 759 +++++++++++++-----
+ .../apps/mall_system_web_app_info.cc          |  20 +-
+ .../config/chrome_web_ui_configs_chromeos.cc  |   9 +-
+ 3 files changed, 568 insertions(+), 220 deletions(-)
+
+diff --git a/ash/webui/media_app_ui/resources/mock/js/app_main.ts b/ash/webui/media_app_ui/resources/mock/js/app_main.ts
+index 394cb1c5f6..02d5a2bae9 100644
+--- a/ash/webui/media_app_ui/resources/mock/js/app_main.ts
++++ b/ash/webui/media_app_ui/resources/mock/js/app_main.ts
+@@ -4,220 +4,610 @@
+ 
+ /**
+  * @fileoverview
+- * Provides a mock of http://go/media-app/index.ts which is pre-built and
+- * brought in via DEPS to ../../app/js/app_main.js. Runs in an isolated guest.
++ * The colorburst Gallery.
++ *
++ * Upstream ships two implementations of this file. The real one (go/media-app)
++ * is a prebuilt bundle pulled from an internal CIPD package, available only to
++ * is_chrome_branded builds with src-internal; every other build gets a mock
++ * whose zero state is a bare <img> with no src, which is why Gallery opened as
++ * a blank window on colorburst.
++ *
++ * colorburst cannot fetch the internal bundle, so this file is no longer a
++ * mock: it is a small, real viewer that implements the same ClientApi the
++ * trusted context talks to (see ../../js/media_app.d.ts). It deliberately does
++ * only what it can do well from public code -- view images, video and audio,
++ * and move through the files the Files app handed over. It does not edit,
++ * annotate or render PDFs; those parts of the real app are the internal ones,
++ * and pretending to offer them would be worse than saying so.
++ *
++ * Runs in an isolated guest (chrome-untrusted://media-app).
+  */
+ 
++/** How far a single zoom step moves, and the range we allow. */
++const ZOOM_STEP = 1.25;
++const ZOOM_MIN = 0.1;
++const ZOOM_MAX = 20;
++
+ /**
+- * Helper that returns UI that can serve as an effective mock of a fragment of
+- * the real app, after loading a provided Blob URL.
++ * UI strings. colorburst boots Vietnamese by default, and this app is one of
++ * the few places a user reads full sentences, so it carries its own strings
++ * rather than shipping English into a Vietnamese session: the untrusted guest
++ * has no access to the browser's string bundle.
+  */
+-type ModuleHandler = (blobSrc: string, file: AbstractFile) =>
+-    Promise<HTMLElement>;
+-
+-const createVideoChild: ModuleHandler = async (blobSrc) => {
+-  const video = document.createElement('video');
+-  video.src = blobSrc;
+-  return video;
++const STRINGS = {
++  en: {
++    empty: 'No file open',
++    emptyHint: 'Open an image or a video from the Files app.',
++    decodeError: 'This file could not be displayed',
++    decodeErrorHint: 'It may be damaged, or in a format Gallery cannot read.',
++    pdfUnsupported: 'PDFs do not open here',
++    pdfUnsupportedHint: 'Open the file in the browser to read it.',
++    previous: 'Previous',
++    next: 'Next',
++    zoomIn: 'Zoom in',
++    zoomOut: 'Zoom out',
++    zoomFit: 'Fit to window',
++    rotate: 'Rotate',
++  },
++  vi: {
++    empty: 'Chưa mở tệp nào',
++    emptyHint: 'Hãy mở một hình ảnh hoặc video từ ứng dụng Tệp.',
++    decodeError: 'Không thể hiển thị tệp này',
++    decodeErrorHint: 'Tệp có thể bị hỏng hoặc ở định dạng Thư viện không đọc được.',
++    pdfUnsupported: 'Không mở được PDF ở đây',
++    pdfUnsupportedHint: 'Hãy mở tệp trong trình duyệt để đọc.',
++    previous: 'Trước',
++    next: 'Sau',
++    zoomIn: 'Phóng to',
++    zoomOut: 'Thu nhỏ',
++    zoomFit: 'Vừa cửa sổ',
++    rotate: 'Xoay',
++  },
+ };
+ 
+-const createImgChild: ModuleHandler = async (blobSrc, file) => {
+-  const img = document.createElement('img');
+-  img.src = blobSrc;
+-  img.alt = file.name;
+-  try {
+-    await img.decode();
+-  } catch (error) {
+-    // Mimic what the real app does on decode errors so we can test error
+-    // handling for file access.
+-    return await createErrorChild(blobSrc, file);
+-  }
+-  return img;
+-};
+-
+-const createAudioChild: ModuleHandler = async (blobSrc, file) => {
+-  const container = document.createElement('div');
+-
+-  const title = container.appendChild(document.createElement('div'));
+-  title.className = 'title';
+-  title.innerText = file.name;
+-
+-  const audio = container.appendChild(document.createElement('audio'));
+-  if (file.size === 0) {
+-    console.warn('Assuming zero-byte test file: not loading audio.');
+-    return container;
+-  }
+-
+-  audio.src = blobSrc;
+-  // Audio will autoplay in this manner. Do the same in the mock to test
+-  // integration points.
+-  audio.play()
+-      .then(() => {
+-        console.log('Audio playing..');
+-      })
+-      .catch(e => {
+-        console.error(String(e));
+-      });
+-  return container;
+-};
++type StringKey = keyof typeof STRINGS['en'];
+ 
+-const createPdfChild: ModuleHandler = async (_, file) => {
+-  const container = document.createElement('div');
++function str(key: StringKey): string {
++  const lang = (document.documentElement.lang || 'en').toLowerCase();
++  const table = lang.startsWith('vi') ? STRINGS.vi : STRINGS.en;
++  return table[key];
++}
+ 
+-  if (file.size === 0) {
+-    console.warn('Assuming zero-byte test file: not loading PDF.');
+-    return container;
++const STYLE = `
++  :host {
++    background: var(--cros-sys-app_base_shaded, #1c1c1e);
++    color: var(--cros-sys-on_surface, #e3e3e3);
++    display: flex;
++    flex-direction: column;
++    font-family: 'Google Sans', Roboto, system-ui, sans-serif;
++    height: 100vh;
++    overflow: hidden;
++    user-select: none;
++    width: 100vw;
+   }
+-
+-  container.appendChild(document.createElement('canvas'));
+-  return container;
++  .bar {
++    align-items: center;
++    background: var(--cros-sys-app_base, #2d2e30);
++    display: flex;
++    flex: 0 0 auto;
++    gap: 4px;
++    height: 48px;
++    padding: 0 8px;
++  }
++  .filename {
++    flex: 1 1 auto;
++    font-size: 13px;
++    overflow: hidden;
++    text-overflow: ellipsis;
++    white-space: nowrap;
++  }
++  .count {
++    color: var(--cros-sys-secondary, #9aa0a6);
++    flex: 0 0 auto;
++    font-size: 12px;
++    font-variant-numeric: tabular-nums;
++    padding: 0 4px;
++  }
++  button {
++    align-items: center;
++    background: transparent;
++    border: none;
++    border-radius: 50%;
++    color: inherit;
++    cursor: pointer;
++    display: flex;
++    flex: 0 0 auto;
++    height: 36px;
++    justify-content: center;
++    padding: 0;
++    width: 36px;
++  }
++  button:hover { background: var(--cros-sys-hover_on_subtle, #ffffff14); }
++  button:active { background: var(--cros-sys-ripple_neutral_on_subtle, #ffffff1f); }
++  button:focus-visible { outline: 2px solid var(--cros-sys-focus_ring, #8ab4f8); }
++  button[hidden] { display: none; }
++  svg { fill: currentColor; height: 20px; width: 20px; }
++  .stage {
++    align-items: center;
++    display: flex;
++    flex: 1 1 auto;
++    justify-content: center;
++    overflow: hidden;
++    position: relative;
++  }
++  .stage.zoomed { cursor: grab; }
++  .stage.panning { cursor: grabbing; }
++  img, video {
++    max-height: 100%;
++    max-width: 100%;
++    object-fit: contain;
++  }
++  img.scaled {
++    max-height: none;
++    max-width: none;
++  }
++  audio { width: min(90%, 480px); }
++  .message {
++    color: var(--cros-sys-secondary, #9aa0a6);
++    max-width: 32em;
++    padding: 24px;
++    text-align: center;
++  }
++  .message h2 {
++    color: var(--cros-sys-on_surface, #e3e3e3);
++    font-size: 15px;
++    font-weight: 500;
++    margin: 0 0 6px;
++  }
++  .message p { font-size: 13px; margin: 0; }
++`;
++
++// Material icon paths, inlined: the guest cannot reach the browser's icon
++// resources.
++const ICON = {
++  prev: 'M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z',
++  next: 'M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z',
++  zoomIn: 'M15.5 14h-.79l-.28-.27a6.47 6.47 0 0 0 1.48-5.34c-.47-2.78-2.79-5-' +
++      '5.59-5.34a6.5 6.5 0 0 0-7.27 7.27c.34 2.8 2.56 5.12 5.34 5.59a6.47 ' +
++      '6.47 0 0 0 5.34-1.48l.27.28v.79l4.25 4.25c.41.41 1.08.41 1.49 0 ' +
++      '.41-.41.41-1.08 0-1.49L15.5 14zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 ' +
++      '9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm.5-7H9v2H7v1h2v2h1v-2h2V9h-2z',
++  zoomOut: 'M15.5 14h-.79l-.28-.27a6.47 6.47 0 0 0 1.48-5.34c-.47-2.78-2.79-5-' +
++      '5.59-5.34a6.5 6.5 0 0 0-7.27 7.27c.34 2.8 2.56 5.12 5.34 5.59a6.47 ' +
++      '6.47 0 0 0 5.34-1.48l.27.28v.79l4.25 4.25c.41.41 1.08.41 1.49 0 ' +
++      '.41-.41.41-1.08 0-1.49L15.5 14zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 ' +
++      '9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z',
++  zoomFit: 'M3 5v4h2V5h4V3H5c-1.1 0-2 .9-2 2zm2 10H3v4c0 1.1.9 2 2 2h4v-2H5v-4z' +
++      'M19 19h-4v2h4c1.1 0 2-.9 2-2v-4h-2v4zm0-16h-4v2h4v4h2V5c0-1.1-.9-2-2-2z',
++  rotate: 'M15.55 5.55 11 1v3.07A7.006 7.006 0 0 0 5 11c0 1.93.78 3.68 2.05 ' +
++      '4.95l1.42-1.42A4.984 4.984 0 0 1 7 11c0-2.05 1.23-3.81 3-4.58V10l4.55' +
++      '-4.45zM19.93 10a7.9 7.9 0 0 0-1.62-3.89l-1.42 1.42A6.1 6.1 0 0 1 17.93' +
++      ' 10h2zM13 17.9v2.02c1.39-.2 2.71-.75 3.9-1.62l-1.44-1.44c-.75.51-1.6' +
++      '.85-2.46.99zm3.89-2.42 1.42 1.41A7.9 7.9 0 0 0 19.93 13h-2a6.1 6.1 0 ' +
++      '0 1-1.04 2.48z',
+ };
+ 
+-const createErrorChild: ModuleHandler = async (_, file) => {
+-  console.warn(`Mock handling of ${file.name} resulted in error.`);
+-  // In the real app, a loaderror element is loaded infront of a placeholder
+-  // image with some error alt text. For tests, we only mock the placeholder.
+-  const img = document.createElement('img');
+-  img.alt = 'Unable to decode';
+-  return img;
+-};
++function svgIcon(path: string): SVGElement {
++  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
++  svg.setAttribute('viewBox', '0 0 24 24');
++  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
++  p.setAttribute('d', path);
++  svg.appendChild(p);
++  return svg;
++}
++
++/** True for the file types this viewer can actually display. */
++function categoryFor(mimeType: string): 'image'|'video'|'audio'|'pdf'|'other' {
++  const [type, subtype] = mimeType.split('/');
++  if (type === 'image') {
++    return 'image';
++  }
++  if (type === 'video') {
++    return 'video';
++  }
++  if (type === 'audio') {
++    return 'audio';
++  }
++  if (type === 'application' && subtype === 'pdf') {
++    return 'pdf';
++  }
++  return 'other';
++}
+ 
+-/**
+- * A mock app used for testing when src-internal is not available.
+- */
+ class BacklightApp extends HTMLElement implements ClientApi {
+-  appBar: BacklightAppBar;
+-  currentHandler: HTMLElement;
+-  currentMedia: HTMLElement;
++  private readonly bar: HTMLElement;
++  private readonly filenameEl: HTMLElement;
++  private readonly countEl: HTMLElement;
++  private readonly stage: HTMLElement;
++  private readonly prevButton: HTMLButtonElement;
++  private readonly nextButton: HTMLButtonElement;
++  private readonly zoomButtons: HTMLElement[] = [];
++
++  /** Object URL of whatever is on stage; revoked when it is replaced. */
++  private blobUrl: string|null = null;
++  private scale = 0;  // 0 means "fit to window".
++  private rotation = 0;
++  private panX = 0;
++  private panY = 0;
+ 
+   files?: AbstractFileList;
+   delegate?: ClientApiDelegate|null;
++  // Kept for the trusted side, which may hand us a file list before the app
++  // element is connected.
++  currentFile: AbstractFile|null = null;
+ 
+   constructor() {
+     super();
+     const shadowRoot = this.attachShadow({mode: 'open'});
+-    this.appBar =
+-        document.createElement('backlight-app-bar') as BacklightAppBar;
++    const style = document.createElement('style');
++    style.textContent = STYLE;
++    shadowRoot.appendChild(style);
++
++    this.bar = document.createElement('div');
++    this.bar.className = 'bar';
++    shadowRoot.appendChild(this.bar);
++
++    this.prevButton = this.makeButton(ICON.prev, str('previous'), () => {
++      void this.navigate(-1);
++    });
++    this.nextButton = this.makeButton(ICON.next, str('next'), () => {
++      void this.navigate(1);
++    });
++    this.filenameEl = document.createElement('div');
++    this.filenameEl.className = 'filename';
++    this.countEl = document.createElement('div');
++    this.countEl.className = 'count';
++
++    this.bar.append(this.prevButton, this.nextButton, this.filenameEl,
++                    this.countEl);
++    this.zoomButtons.push(
++        this.makeButton(ICON.zoomOut, str('zoomOut'), () => this.zoomBy(1 / ZOOM_STEP)),
++        this.makeButton(ICON.zoomIn, str('zoomIn'), () => this.zoomBy(ZOOM_STEP)),
++        this.makeButton(ICON.zoomFit, str('zoomFit'), () => this.resetView()),
++        this.makeButton(ICON.rotate, str('rotate'), () => this.rotate()));
++    this.bar.append(...this.zoomButtons);
++
++    this.stage = document.createElement('div');
++    this.stage.className = 'stage';
++    shadowRoot.appendChild(this.stage);
++
++    this.showMessage(str('empty'), str('emptyHint'));
++    this.updateChrome();
++
++    document.addEventListener('keydown', (e) => this.onKeyDown(e));
++    this.stage.addEventListener('wheel', (e) => this.onWheel(e), {passive: false});
++    this.stage.addEventListener('pointerdown', (e) => this.onPointerDown(e));
++    this.stage.addEventListener('dblclick', () => {
++      this.scale ? this.resetView() : this.zoomBy(2);
++    });
++  }
+ 
+-    shadowRoot.appendChild(this.appBar);
+-    this.currentHandler = document.createElement('backlight-media-handler');
+-    this.appendChild(this.currentHandler);
+-    this.currentMedia = document.createElement('img');
+-    this.appendChild(this.currentMedia);
++  private makeButton(icon: string, label: string, onClick: () => void):
++      HTMLButtonElement {
++    const button = document.createElement('button');
++    button.appendChild(svgIcon(icon));
++    button.title = label;
++    button.setAttribute('aria-label', label);
++    button.addEventListener('click', onClick);
++    return button;
+   }
+ 
+-  /**
+-   * Emulates the preprocessing done in the "real" BacklightApp to hook in the
+-   * RAW file converter. See go/media-app-element.
+-   */
+-  private async preprocessFile(file: AbstractFile|null) {
+-    // This mock is only used for tests (which only test a .orf and .nef RAW
+-    // file). We don't maintain the full list of RAW extensions here.
+-    const rawExtensions = ['orf', 'nef'];
+-    const isRawFile =
+-        file && rawExtensions.includes(file.name.split('.').pop() ?? '');
+-    if (isRawFile) {
+-      file.blob = await this.delegate!.extractPreview(file.blob);
+-      file.mimeType = 'image/x-RAW';
++  /** Replaces whatever is on stage, releasing the previous blob URL. */
++  private setStageContent(child: HTMLElement) {
++    if (this.blobUrl) {
++      URL.revokeObjectURL(this.blobUrl);
++      this.blobUrl = null;
+     }
++    this.stage.replaceChildren(child);
++  }
++
++  private showMessage(title: string, hint: string) {
++    const container = document.createElement('div');
++    container.className = 'message';
++    const h = document.createElement('h2');
++    h.textContent = title;
++    const p = document.createElement('p');
++    p.textContent = hint;
++    container.append(h, p);
++    this.setStageContent(container);
+   }
+ 
+   /**
+-   * Emulates the sniffing done in the "real" BacklightApp to detect a file's
+-   * mime type. See go/media-app-element.
+-   *
+-   * @return The sniffed mime type, or empty string if none detected.
++   * Mirrors the preprocessing the real app does to hook in the RAW converter:
++   * the trusted context can pull a full-size JPEG preview out of a RAW file,
++   * which is the only way this viewer can show one.
+    */
+-  private async sniffedMimeType(file: AbstractFile): Promise<string> {
+-    const START_OF_IMAGE_MARKER = 0xffd8;
+-
+-    const PNG_MARKER = 0x89504e47;  // Literally '‰PNG'.
++  private async preprocessFile(file: AbstractFile) {
++    const RAW_EXTENSIONS = [
++      'arw', 'cr2', 'crw', 'dng', 'nef', 'nrw', 'orf', 'raf', 'rw2',
++    ];
++    const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
++    if (!RAW_EXTENSIONS.includes(extension) || !this.delegate?.extractPreview) {
++      return;
++    }
++    try {
++      file.blob = await this.delegate.extractPreview(file.blob);
++      file.mimeType = 'image/jpeg';
++    } catch (error) {
++      console.warn(`Gallery: no preview in ${file.name}:`, error);
++    }
++  }
+ 
+-    if (file.size < 4) {
++  /** Sniffs a mime type when the file list did not provide one. */
++  private async sniffedMimeType(file: AbstractFile): Promise<string> {
++    if (file.size < 12) {
+       return '';
+     }
+-
+-    const view = new DataView(await file.blob.slice(0, 4).arrayBuffer());
+-    if (view.getUint32(0) === PNG_MARKER) {
++    const view = new DataView(await file.blob.slice(0, 12).arrayBuffer());
++    const u32 = view.getUint32(0);
++    if (u32 === 0x89504e47) {
+       return 'image/png';
+     }
+-    if (view.getUint16(0) === START_OF_IMAGE_MARKER) {
++    if (view.getUint16(0) === 0xffd8) {
+       return 'image/jpeg';
+     }
++    if (u32 === 0x47494638) {
++      return 'image/gif';
++    }
++    if (u32 === 0x25504446) {
++      return 'application/pdf';
++    }
++    // RIFF....WEBP
++    if (u32 === 0x52494646 && view.getUint32(8) === 0x57454250) {
++      return 'image/webp';
++    }
+     return '';
+   }
+ 
+-  /**
+-   * Emulates loading a single file at a time.
+-   */
+   async loadFile(file: AbstractFile) {
+     await this.preprocessFile(file);
+     const mimeType = file.mimeType || await this.sniffedMimeType(file);
+-    let factory;
+-    const [type, subtype] = mimeType.split('/');
+-    switch (type) {
+-      case 'video':
+-        factory = createVideoChild;
++    this.currentFile = file;
++    this.resetViewState();
++
++    const category = categoryFor(mimeType);
++    if (category === 'pdf') {
++      this.showMessage(str('pdfUnsupported'), str('pdfUnsupportedHint'));
++    } else if (category === 'other') {
++      this.showMessage(str('decodeError'), str('decodeErrorHint'));
++    } else {
++      const url = URL.createObjectURL(file.blob);
++      let child: HTMLElement;
++      if (category === 'image') {
++        const img = document.createElement('img');
++        img.src = url;
++        img.alt = file.name;
++        img.draggable = false;
++        try {
++          await img.decode();
++          child = img;
++        } catch (error) {
++          console.warn(`Gallery: cannot decode ${file.name}:`, error);
++          URL.revokeObjectURL(url);
++          this.showMessage(str('decodeError'), str('decodeErrorHint'));
++          this.updateChrome();
++          this.notify(file, mimeType);
++          return;
++        }
++      } else if (category === 'video') {
++        const video = document.createElement('video');
++        video.src = url;
++        video.controls = true;
++        video.autoplay = true;
++        child = video;
++      } else {
++        const audio = document.createElement('audio');
++        audio.src = url;
++        audio.controls = true;
++        audio.autoplay = true;
++        child = audio;
++      }
++      this.setStageContent(child);
++      this.blobUrl = url;
++    }
++
++    this.updateChrome();
++    this.notify(file, mimeType);
++  }
++
++  /**
++   * Tells the trusted context which file is showing. This is what puts the
++   * file name in the window title, so it runs for error states too.
++   */
++  private notify(file: AbstractFile, mimeType: string) {
++    this.delegate?.notifyCurrentFile(file.name, mimeType);
++  }
++
++  private get imageOnStage(): HTMLImageElement|null {
++    const child = this.stage.firstElementChild;
++    return child instanceof HTMLImageElement ? child : null;
++  }
++
++  private resetViewState() {
++    this.scale = 0;
++    this.rotation = 0;
++    this.panX = 0;
++    this.panY = 0;
++  }
++
++  private resetView() {
++    this.resetViewState();
++    this.applyTransform();
++  }
++
++  private rotate() {
++    this.rotation = (this.rotation + 90) % 360;
++    this.applyTransform();
++  }
++
++  private zoomBy(factor: number) {
++    const img = this.imageOnStage;
++    if (!img) {
++      return;
++    }
++    // The first zoom step leaves "fit to window" behind, so it has to start
++    // from the size the image is actually being displayed at, not from 1.
++    const current = this.scale || (img.clientWidth / img.naturalWidth) || 1;
++    this.scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, current * factor));
++    this.applyTransform();
++  }
++
++  private applyTransform() {
++    const img = this.imageOnStage;
++    if (!img) {
++      return;
++    }
++    const zoomed = this.scale > 0;
++    img.classList.toggle('scaled', zoomed);
++    this.stage.classList.toggle('zoomed', zoomed);
++    if (zoomed) {
++      img.style.width = `${img.naturalWidth * this.scale}px`;
++      img.style.height = `${img.naturalHeight * this.scale}px`;
++    } else {
++      img.style.width = '';
++      img.style.height = '';
++      this.panX = this.panY = 0;
++    }
++    img.style.transform =
++        `translate(${this.panX}px, ${this.panY}px) rotate(${this.rotation}deg)`;
++  }
++
++  private onWheel(event: WheelEvent) {
++    if (!this.imageOnStage) {
++      return;
++    }
++    // Plain wheel scrolls nothing here, so use it to zoom; this matches how
++    // every other image viewer on the platform behaves.
++    event.preventDefault();
++    this.zoomBy(event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
++  }
++
++  private onPointerDown(event: PointerEvent) {
++    if (!this.scale || !this.imageOnStage || event.button !== 0) {
++      return;
++    }
++    event.preventDefault();
++    const startX = event.clientX - this.panX;
++    const startY = event.clientY - this.panY;
++    this.stage.classList.add('panning');
++    const move = (e: PointerEvent) => {
++      this.panX = e.clientX - startX;
++      this.panY = e.clientY - startY;
++      this.applyTransform();
++    };
++    const up = () => {
++      this.stage.classList.remove('panning');
++      window.removeEventListener('pointermove', move);
++      window.removeEventListener('pointerup', up);
++    };
++    window.addEventListener('pointermove', move);
++    window.addEventListener('pointerup', up);
++  }
++
++  private onKeyDown(event: KeyboardEvent) {
++    // Let the media elements have their own keys (space, arrows for seeking).
++    const stageChild = this.stage.firstElementChild;
++    const isMediaElement = stageChild instanceof HTMLVideoElement ||
++        stageChild instanceof HTMLAudioElement;
++    switch (event.key) {
++      case 'ArrowRight':
++        if (isMediaElement) {
++          return;
++        }
++        void this.navigate(1);
+         break;
+-      case 'image':
+-        factory = createImgChild;
++      case 'ArrowLeft':
++        if (isMediaElement) {
++          return;
++        }
++        void this.navigate(-1);
+         break;
+-      case 'audio':
+-        factory = createAudioChild;
++      case '+':
++      case '=':
++        this.zoomBy(ZOOM_STEP);
+         break;
+-      case 'application':
+-        if (subtype === 'pdf') {
+-          factory = createPdfChild;
+-          break;
+-        }
+-        factory = createErrorChild;
++      case '-':
++        this.zoomBy(1 / ZOOM_STEP);
++        break;
++      case '0':
++        this.resetView();
++        break;
++      case 'r':
++        this.rotate();
+         break;
+       default:
+-        factory = createErrorChild;
++        return;
+     }
+-    // Note the mock app will just leak this Blob URL.
+-    const child = await factory(URL.createObjectURL(file.blob), file);
++    event.preventDefault();
++  }
+ 
+-    this.replaceChild(child, this.currentMedia);
+-    this.currentMedia = child;
+-    if (mimeType === 'application/pdf') {
+-      this.delegate!.notifyFileOpened(file.name, mimeType);
++  /**
++   * Asks the trusted context for the next or previous file. It answers by
++   * sending a fresh file list, which lands back here in loadFiles().
++   */
++  private async navigate(direction: number) {
++    if (!this.files || this.files.length < 2) {
++      return;
++    }
++    const token = this.currentFile?.token;
++    if (direction > 0) {
++      await this.files.loadNext(token);
++    } else {
++      await this.files.loadPrev(token);
+     }
+-    this.delegate!.notifyCurrentFile(file.name, mimeType);
+-    this.appBar.setFilename(file.name);
+   }
+ 
+-  updateHandler() {
+-    // Loads a new handler each time a new media is loaded. Note: in actual
+-    // implementation we cache our handler instances and early exit if we load
+-    // the same media type.
+-    const newHandler = document.createElement('backlight-media-handler');
+-    this.replaceChild(newHandler, this.currentHandler);
+-    this.currentHandler = newHandler;
+-
+-    // The presence of the 'filetraversalenabled' attribute emulates
+-    // `setFileTraversalEnabled()` in the real app.
+-    this.currentHandler.toggleAttribute(
+-        'filetraversalenabled', this.files!.length > 1);
++  private updateChrome() {
++    const count = this.files?.length ?? 0;
++    const index = this.files?.currentFileIndex ?? -1;
++    this.filenameEl.textContent = this.currentFile?.name ?? '';
++    const showCount = count > 1 && index >= 0;
++    this.countEl.textContent = showCount ? `${index + 1} / ${count}` : '';
++    this.prevButton.hidden = count < 2;
++    this.nextButton.hidden = count < 2;
++    const isImage = !!this.imageOnStage;
++    for (const button of this.zoomButtons) {
++      button.hidden = !isImage;
++    }
+   }
+ 
+   // ClientApi implementation:
++
+   async loadFiles(files: AbstractFileList) {
+     this.files = files;
+     files.addObserver((f: AbstractFileList) => this.onNewFiles(f));
+ 
+     const file = files.item(files.currentFileIndex);
+     if (!file) {
+-      // Emulate zero state.
+-      const child = document.createElement('img');
+-      this.replaceChild(child, this.currentMedia);
+-      this.currentMedia = child;
++      this.currentFile = null;
++      this.showMessage(str('empty'), str('emptyHint'));
++      this.updateChrome();
++      return;
++    }
++    await this.loadFile(file);
++  }
++
++  onNewFiles(files: AbstractFileList) {
++    if (files !== this.files) {
++      return;
++    }
++    // The list changed under us (files added or removed by the Files app). If
++    // the current file moved, follow it; otherwise just refresh the counter.
++    const file = files.item(files.currentFileIndex);
++    if (file && file !== this.currentFile) {
++      void this.loadFile(file);
+     } else {
+-      this.loadFile(file);
++      this.updateChrome();
+     }
+-    this.updateHandler();
+   }
+ 
++  setDelegate(delegate: ClientApiDelegate|null) {
++    this.delegate = delegate;
++  }
++
++  // The PDF and Mantis (generative edit) surfaces belong to the internal
++  // bundle. These are the no-op answers that keep the trusted context's calls
++  // from throwing; nothing in this viewer invokes them.
+   async requestBitmap(_requestedPageId: string) {
+     return {
+       'page': {
+@@ -242,89 +632,38 @@ class BacklightApp extends HTMLElement implements ClientApi {
+   async setPdfOcrEnabled(_enabled: boolean) {}
+ 
+   async getPdfContent(_limit: number) {
+-    return {
+-      'content': 'test content',
+-    };
++    return {'content': ''};
+   }
+ 
+   async hidePdfContextMenu() {}
+ 
+   reportMantisProgress(_progress: number) {}
+-
+-  setDelegate(delegate: ClientApiDelegate|null) {
+-    this.delegate = delegate;
+-  }
+-
+-  onNewFiles(files: AbstractFileList) {
+-    if (files !== this.files) {
+-      return;
+-    }
+-
+-    // Handlers in the real app contain a notion of the "current" file. For the
+-    // mock, assume here that the current file does not change when new files
+-    // are added to the file list. However, we still "update" the handler to
+-    // ensure it reflects the navigation state when new files are added. Note
+-    // merely toggling attributes here will fail to notify mutation observers.
+-    this.updateHandler();
+-  }
+ }
+ 
+ window.customElements.define('backlight-app', BacklightApp);
+ 
+-// Element mimicking the app bar which contains the current file's name.
+-class BacklightAppBar extends HTMLElement {
+-  child: HTMLElement;
+-
+-  constructor() {
+-    super();
+-    const shadowRoot = this.attachShadow({mode: 'open'});
+-    this.child = document.createElement('div');
+-    this.child.classList.add('app-bar-filename');
+-
+-    shadowRoot.appendChild(this.child);
+-  }
+-
+-  setFilename(filename: string) {
+-    this.child.setAttribute('filename', filename);
+-  }
+-}
++// The trusted context and the browser tests look for these element names, so
++// they keep their upstream spelling even though this viewer draws its own UI.
++class BacklightAppBar extends HTMLElement {}
+ window.customElements.define('backlight-app-bar', BacklightAppBar);
+ 
+-// Element mimicking the image/video handler which is the parent of the
+-// `carousel-overlay`.
+ class BacklightMediaHandler extends HTMLElement {}
+ window.customElements.define('backlight-media-handler', BacklightMediaHandler);
+ 
+ class VideoContainer extends HTMLElement {}
+ window.customElements.define('backlight-video-container', VideoContainer);
+ 
+-// Add error handlers similar to go/error-collector to test crash reporting in
+-// the mock app. The handlers in go/error-collector are compiled-in and have
+-// more sophisticated message extraction, with fewer assumptions.
+-function sendCrashReport(params: any) {
+-  (window as any).chrome.crashReportPrivate.reportError(params, () => {});
+-}
++// Upstream's mock reports uncaught errors to Google's crash service here.
++// colorburst has no crash reporting, so errors go to the console instead.
+ self.addEventListener('error', (errorEvent: ErrorEvent) => {
+-  sendCrashReport({
+-    message: errorEvent.error.message,
+-    url: window.location.href,
+-    product: 'ChromeOS_MediaAppMock',
+-    lineNumber: errorEvent.lineno,
+-    columnNumber: errorEvent.colno,
+-  });
++  console.error('Gallery error:', errorEvent.error ?? errorEvent.message);
+ });
+ self.addEventListener('unhandledrejection', (event: Event) => {
+-  const rejectionEvent = event as unknown as {reason: Error};
+-  sendCrashReport({
+-    message: rejectionEvent.reason.message,
+-    url: window.location.href,
+-    product: 'ChromeOS_MediaAppMock',
+-  });
++  const rejectionEvent = event as unknown as {reason: unknown};
++  console.error('Gallery rejection:', rejectionEvent.reason);
+ });
+ 
+ document.addEventListener('DOMContentLoaded', () => {
+-  // The "real" app first loads translations for populating strings in the app
+-  // for the initial load, then does this. See go/media-app-loadapp.
+   const app = new BacklightApp();
+   document.body.appendChild(app);
+ 
+diff --git a/chrome/browser/ash/system_web_apps/apps/mall_system_web_app_info.cc b/chrome/browser/ash/system_web_apps/apps/mall_system_web_app_info.cc
+index 8d63d66171..1fa7d8406b 100644
+--- a/chrome/browser/ash/system_web_apps/apps/mall_system_web_app_info.cc
++++ b/chrome/browser/ash/system_web_apps/apps/mall_system_web_app_info.cc
+@@ -53,14 +53,18 @@ MallSystemAppDelegate::GetWebAppInfo() const {
+ }
+ 
+ bool MallSystemAppDelegate::IsAppEnabled() const {
+-  if (apps::DetermineUserType(profile()) != apps::kUserTypeUnmanaged) {
+-    return false;
+-  }
+-  // Do not enable Mall on Flex devices, which do  not support apps on ARC.
+-  if (ash::switches::IsRevenBranding()) {
+-    return false;
+-  }
+-  return true;
++  // NOTE(colorburst fork): "Apps & games" (IDS_MALL_APP_NAME) is a thin frame
++  // around Google's hosted app-mall service. A colorburst device has no Google
++  // account and no ARC, so the surface is dead: it shipped as a launcher icon
++  // and a pinned shelf item that open nothing. Upstream already turns it off
++  // for Flex (ash::switches::IsRevenBranding()); colorburst is reven-based but
++  // does not set that branding switch, so it needs to say so itself.
++  //
++  // Returning false here is the whole disable: SystemWebAppManager filters the
++  // delegate out before install, which also short-circuits the default shelf
++  // pin (ShelfControllerHelper::IsAppDefaultInstalled) and the launcher
++  // ordering entries. chrome://mall stays registered but unreachable from UI.
++  return false;
+ }
+ 
+ std::vector<std::string> MallSystemAppDelegate::GetAppIdsToUninstallAndReplace()
+diff --git a/chrome/browser/ui/webui/ash/config/chrome_web_ui_configs_chromeos.cc b/chrome/browser/ui/webui/ash/config/chrome_web_ui_configs_chromeos.cc
+index c587ab3bc8..d87b19db7b 100644
+--- a/chrome/browser/ui/webui/ash/config/chrome_web_ui_configs_chromeos.cc
++++ b/chrome/browser/ui/webui/ash/config/chrome_web_ui_configs_chromeos.cc
+@@ -280,8 +280,13 @@ void RegisterAshChromeWebUIConfigs() {
+   map.AddWebUIConfig(std::make_unique<LauncherInternalsUIConfig>());
+   map.AddWebUIConfig(std::make_unique<LockScreenNetworkUIConfig>());
+   map.AddWebUIConfig(std::make_unique<LockScreenStartReauthUIConfig>());
+-  map.AddWebUIConfig(MakeComponentConfigWithDelegate<MallUIConfig, MallUI,
+-                                                     ChromeMallUIDelegate>());
++  // NOTE(colorburst fork): chrome://mall is not registered. Turning off the
++  // "Apps & games" system web app (MallSystemAppDelegate::IsAppEnabled) takes
++  // it out of the launcher and shelf, but leaves the WebUI reachable by URL --
++  // and its page immediately embeds https://discover.apps.chrome/, handing
++  // Google the board, OS and Chrome versions, hwid and locale. There is
++  // nothing behind it for a colorburst device anyway, so the whole surface is
++  // gone rather than merely hidden.
+   map.AddWebUIConfig(std::make_unique<ManageMirrorSyncUIConfig>());
+   map.AddWebUIConfig(
+       MakeComponentConfigWithDelegate<MediaAppUIConfig, MediaAppUI,
+-- 
+2.53.0
+
