@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Redirects the two projects we patch to the colorburst-os forks; every other
+  project still comes from upstream. Install with:
+
+      ln -s ../../local_manifests/colorburst.xml \
+            chromiumos/.repo/local_manifests/colorburst.xml
+      repo sync
+
+  Each fork keeps upstream as a second remote ("cros"), so the patch branch
+  can be rebased when upstream moves:
+
+      git fetch cros && git rebase cros/<upstream branch>
+-->
+<manifest>
+  <!--
+    HTTPS, not SSH: these are private repos owned by the colorburst-os org.
+    Credentials come from the gh credential helper (`gh auth setup-git`).
+  -->
+  <remote name="colorburst" fetch="https://github.com/colorburst-os/" />
+
+  <!-- gpu_display: window decorations + configurable display scale -->
+  <remove-project name="chromiumos/platform/crosvm" />
+  <project name="crosvm" path="src/platform/crosvm" remote="colorburst"
+           revision="refs/heads/colorburst/gpu-display" groups="crosvm" />
+
+  <!-- overlay-amd64-generic: virgl in VIDEO_CARDS -->
+  <remove-project name="chromiumos/overlays/board-overlays" />
+  <project name="board-overlays" path="src/overlays" remote="colorburst"
+           revision="refs/heads/colorburst/virgl"
+           groups="firmware,minilayout,paygen" />
+</manifest>
