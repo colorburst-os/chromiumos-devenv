@@ -1,0 +1,49 @@
+From dec574a50f9facb18a236d5cda6a9aed3d9dfe34 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 17:33:37 -0700
+Subject: [PATCH] Hide the 'for work' card on the user-creation screen
+
+It leads to enterprise enrollment, a Gaia flow that cannot work on
+this build. The card is hidden outright, and the next-button handler
+ignores a stray enroll selection instead of starting the triage flow.
+---
+ .../chromeos/login/screens/common/user_creation.html         | 4 +++-
+ .../resources/chromeos/login/screens/common/user_creation.ts | 5 ++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+index 62eb5eb05e..cb616d419f 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+@@ -86,8 +86,10 @@ found in the LICENSE file.
+           </div>
+         </div>
+       </cr-card-radio-button>
++      <!-- NOTE(colorburst fork): the "for work" card leads to enterprise
++           enrollment, a Gaia flow that cannot work on this build. -->
+       <cr-card-radio-button id="enrollButton"
+-          hidden="[[!isOobeSoftwareUpdateEnabled_]]"
++          hidden
+           class="flex" name="enroll">
+         <div class="card-container">
+           <hd-iron-icon class="card-icon" icon1x="oobe-48:add-work"
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+index 609f0b394e..be58aa8744 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.ts
+@@ -326,7 +326,10 @@ export class UserCreation extends UserCreationScreenElementBase {
+           this.userActed(UserAction.ADD_CHILD);
+         }
+       } else if (this.selectedUserType === UserCreationUserType.ENROLL) {
+-        this.userActed(UserAction.TRIAGE);
++        // NOTE(colorburst fork): the enroll card is hidden in the HTML; if
++        // the value shows up anyway (restored state, programmatic
++        // selection), do nothing rather than start enterprise enrollment.
++        return;
+       } else if (this.selectedUserType === UserCreationUserType.LOCAL) {
+         this.userActed(UserAction.LOCAL_ACCOUNT);
+       }
+-- 
+2.53.0
+

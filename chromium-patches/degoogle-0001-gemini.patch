@@ -1,0 +1,131 @@
+From 029155ace101c76e102e45b72925167346a29fa7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 08:42:34 -0700
+Subject: [PATCH 1/2] Remove every Gemini surface a local-account user can
+ reach
+
+The OOBE Gemini intro ("your device comes with Gemini") and AI intro
+screens are skipped unconditionally; the perks-discovery screen (which
+serves Google growth campaigns, including a Gemini offer, to unmanaged
+accounts) is disabled; and kGeminiAppPreinstall is off, which removes
+the Gemini PWA and with it the launcher search-box button, the default
+shelf pin, the Settings app row, and the Assistant entry-point redirect.
+---
+ ash/constants/ash_features.cc                 |  5 +++-
+ .../ash/login/screens/ai_intro_screen.cc      | 25 ++++------------
+ .../ash/login/screens/gemini_intro_screen.cc  | 29 ++++---------------
+ chromeos/constants/chromeos_features.cc       |  5 +++-
+ 4 files changed, 20 insertions(+), 44 deletions(-)
+
+diff --git a/ash/constants/ash_features.cc b/ash/constants/ash_features.cc
+index af12d15a1f..c1e588fe34 100644
+--- a/ash/constants/ash_features.cc
++++ b/ash/constants/ash_features.cc
+@@ -1378,7 +1378,10 @@ BASE_FEATURE(kOobeJelly, base::FEATURE_ENABLED_BY_DEFAULT);
+ BASE_FEATURE(kOobeJellyModal, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ // Enables OOBE perks discovery feature.
+-BASE_FEATURE(kOobePerksDiscovery, base::FEATURE_ENABLED_BY_DEFAULT);
++// NOTE(colorburst fork): disabled (upstream: enabled). The perks screen serves
++// Google growth campaigns, including the "Gamgee" Gemini offer; none of them
++// apply to a Gaia-less local account.
++BASE_FEATURE(kOobePerksDiscovery, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ // Enables OOBE ai intro feature.
+ BASE_FEATURE(kFeatureManagementOobeAiIntro, base::FEATURE_DISABLED_BY_DEFAULT);
+diff --git a/chrome/browser/ash/login/screens/ai_intro_screen.cc b/chrome/browser/ash/login/screens/ai_intro_screen.cc
+index e545a4f2a7..c840e022ee 100644
+--- a/chrome/browser/ash/login/screens/ai_intro_screen.cc
++++ b/chrome/browser/ash/login/screens/ai_intro_screen.cc
+@@ -34,25 +34,12 @@ std::string AiIntroScreen::GetResultString(Result result) {
+ 
+ // static
+ bool AiIntroScreen::ShouldBeSkipped() {
+-  if (!features::IsOobeAiIntroEnabled()) {
+-    return true;
+-  }
+-
+-  auto* user_manager = user_manager::UserManager::Get();
+-  if (user_manager->IsLoggedInAsChildUser()) {
+-    return true;
+-  }
+-
+-  // Skip the screen if `kShowAiIntroScreenEnabled` preference is set by
+-  // managed user default or admin to false.
+-  const PrefService::Preference* pref =
+-      ProfileManager::GetActiveUserProfile()->GetPrefs()->FindPreference(
+-          prefs::kShowAiIntroScreenEnabled);
+-  if (pref->IsManaged() && !pref->GetValue()->GetBool()) {
+-    return true;
+-  }
+-
+-  return false;
++  // NOTE(colorburst fork): never show the OOBE AI/Gemini carousel. Its
++  // kFeatureManagementOobeAiIntro gate is off by default upstream but can be
++  // switched on per-device by the feature-management module, so skip
++  // unconditionally instead of trusting the feature/pref checks upstream
++  // performed here.
++  return true;
+ }
+ 
+ AiIntroScreen::AiIntroScreen(base::WeakPtr<AiIntroScreenView> view,
+diff --git a/chrome/browser/ash/login/screens/gemini_intro_screen.cc b/chrome/browser/ash/login/screens/gemini_intro_screen.cc
+index e61528322a..a6e4bd1190 100644
+--- a/chrome/browser/ash/login/screens/gemini_intro_screen.cc
++++ b/chrome/browser/ash/login/screens/gemini_intro_screen.cc
+@@ -37,29 +37,12 @@ std::string GeminiIntroScreen::GetResultString(Result result) {
+ 
+ // static
+ bool GeminiIntroScreen::ShouldBeSkipped() {
+-  PrefService* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
+-
+-  // Skip the screen if the perk was already shown to the user in perks
+-  // discovery.
+-  if (features::IsOobePerksDiscoveryEnabled() &&
+-      prefs->GetBoolean(prefs::kOobePerksDiscoveryGamgeeShown)) {
+-    return true;
+-  }
+-
+-  auto* user_manager = user_manager::UserManager::Get();
+-  if (user_manager->IsLoggedInAsChildUser()) {
+-    return true;
+-  }
+-
+-  // Skip the screen if `kShowGeminiIntroScreenEnabled` preference is set by
+-  // managed user default or admin to false.
+-  const PrefService::Preference* pref =
+-      prefs->FindPreference(prefs::kShowGeminiIntroScreenEnabled);
+-  if (pref->IsManaged() && !pref->GetValue()->GetBool()) {
+-    return true;
+-  }
+-
+-  return false;
++  // NOTE(colorburst fork): never advertise Gemini. This build runs Gaia-less
++  // local accounts with Google services disabled, so the "your device comes
++  // with Gemini" pitch is both unwanted and untrue. Upstream consulted the
++  // perks-discovery pref, the child-user state, and the managed
++  // kShowGeminiIntroScreenEnabled pref here; we skip unconditionally.
++  return true;
+ }
+ 
+ GeminiIntroScreen::GeminiIntroScreen(base::WeakPtr<GeminiIntroScreenView> view,
+diff --git a/chromeos/constants/chromeos_features.cc b/chromeos/constants/chromeos_features.cc
+index 6e38b32fe4..dab740629e 100644
+--- a/chromeos/constants/chromeos_features.cc
++++ b/chromeos/constants/chromeos_features.cc
+@@ -58,7 +58,10 @@ BASE_FEATURE(kEssentialSearch, base::FEATURE_ENABLED_BY_DEFAULT);
+ BASE_FEATURE(kExternalDisplayEventTelemetry, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ // Feature flag used to gate preinstallation of the Gemini app.
+-BASE_FEATURE(kGeminiAppPreinstall, base::FEATURE_ENABLED_BY_DEFAULT);
++// NOTE(colorburst fork): disabled (upstream: enabled). This keeps the Gemini
++// web app off the device entirely, which also removes its launcher search-box
++// button, default shelf pin, and app row in Settings.
++BASE_FEATURE(kGeminiAppPreinstall, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ // Enables the Badge Authentication flow on the lock screen.
+ BASE_FEATURE(kLockScreenBadgeAuth, base::FEATURE_ENABLED_BY_DEFAULT);
+-- 
+2.53.0
+

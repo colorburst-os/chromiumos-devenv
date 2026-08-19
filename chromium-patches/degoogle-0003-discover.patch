@@ -1,0 +1,97 @@
+From 92fe9637142c1b6acbc8123a2bbdcb81469d35e1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 16:14:15 -0700
+Subject: [PATCH 2/2] Remove the Discover (help) app and the Welcome Tour
+
+The Discover SWA is non-functional on a Google-less build: its content
+needs Google services. Disable its System Web App registration (never
+installed, no launcher entry, no background page), skip the first-run
+auto-launch, and disable the Welcome Tour, whose step 6 anchors to the
+now-absent app and whose finale launches it. All remaining references
+(feedback links, launcher search, release-notes chip) degrade to no-ops.
+---
+ ash/constants/ash_features.cc                        |  8 +++++++-
+ chrome/browser/ash/first_run/first_run.cc            | 12 ++++++++++++
+ .../apps/help_app/help_app_web_app_info.cc           | 10 ++++++++++
+ .../apps/help_app/help_app_web_app_info.h            |  1 +
+ 4 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/ash/constants/ash_features.cc b/ash/constants/ash_features.cc
+index c1e588fe34..d32bb75130 100644
+--- a/ash/constants/ash_features.cc
++++ b/ash/constants/ash_features.cc
+@@ -1930,7 +1930,13 @@ BASE_FEATURE(kWakeOnWifiAllowed, base::FEATURE_DISABLED_BY_DEFAULT);
+ BASE_FEATURE(kWallpaperFastRefresh, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ // Enables the Welcome Tour that walks new users through ChromeOS System UI.
+-BASE_FEATURE(kWelcomeTour, base::FEATURE_ENABLED_BY_DEFAULT);
++// NOTE(colorburst fork): disabled (upstream: enabled). The tour's step 6
++// anchors a help bubble to the Discover/Explore app, whose System Web App is
++// disabled on this build (see HelpAppSystemAppDelegate::IsAppEnabled), and its
++// finale launches that app; without it the tour would stall on a missing
++// anchor. Its "new user" eligibility check also depends on sync
++// (was_first_sync_ever), which never runs for Gaia-less local accounts.
++BASE_FEATURE(kWelcomeTour, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ // Whether ChromeVox is supported in the Welcome Tour that walks new users
+ // through ChromeOS System UI.
+diff --git a/chrome/browser/ash/first_run/first_run.cc b/chrome/browser/ash/first_run/first_run.cc
+index e16305448e..0fedf6ffef 100644
+--- a/chrome/browser/ash/first_run/first_run.cc
++++ b/chrome/browser/ash/first_run/first_run.cc
+@@ -120,6 +120,18 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+ }
+ 
+ bool ShouldLaunchHelpApp(Profile* profile) {
++  // NOTE(colorburst fork): the Discover/Help app's System Web App is disabled
++  // on this build (see HelpAppSystemAppDelegate::IsAppEnabled), so it is not
++  // in the delegate map and must never be auto-launched after OOBE. Bailing
++  // out here (always taken, since the app is disabled) also keeps the caller
++  // from appending kSilentLaunch, so the first browser window of a new
++  // session opens normally (with the colorburst startup page) instead of
++  // being suppressed in favor of the first-run tour.
++  SystemWebAppManager* swa_manager = SystemWebAppManager::Get(profile);
++  if (!swa_manager || !swa_manager->GetSystemApp(SystemWebAppType::HELP)) {
++    return false;
++  }
++
+   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+   // Even if we don't launch the help app now, define the preferences for what
+diff --git a/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.cc b/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.cc
+index 1ced09b18a..d7a5d9eb9d 100644
+--- a/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.cc
++++ b/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.cc
+@@ -36,6 +36,16 @@ HelpAppSystemAppDelegate::HelpAppSystemAppDelegate(Profile* profile)
+                            GURL("chrome://help-app/pwa.html"),
+                            profile) {}
+ 
++bool HelpAppSystemAppDelegate::IsAppEnabled() const {
++  // NOTE(colorburst fork): the "Discover" (formerly Explore/Help) app is a
++  // Google-services surface and is non-functional on this Gaia-less build, so
++  // its System Web App is not registered: it is never installed, never shows
++  // in the launcher, and its background task never runs. Everything that
++  // routes to it goes through LaunchSystemWebAppAsync(SystemWebAppType::HELP),
++  // which silently no-ops when the app is not registered.
++  return false;
++}
++
+ gfx::Rect HelpAppSystemAppDelegate::GetDefaultBounds(BrowserDelegate*) const {
+   // Help app is centered.
+   gfx::Rect bounds =
+diff --git a/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.h b/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.h
+index 215c7d88cb..d94fc07c2d 100644
+--- a/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.h
++++ b/chrome/browser/ash/system_web_apps/apps/help_app/help_app_web_app_info.h
+@@ -24,6 +24,7 @@ class HelpAppSystemAppDelegate : public SystemWebAppDelegate {
+   explicit HelpAppSystemAppDelegate(Profile* profile);
+ 
+   // SystemWebAppDelegate overrides:
++  bool IsAppEnabled() const override;
+   std::unique_ptr<web_app::WebAppInstallInfo> GetWebAppInfo() const override;
+   gfx::Rect GetDefaultBounds(BrowserDelegate*) const override;
+   gfx::Size GetMinimumWindowSize() const override;
+-- 
+2.53.0
+

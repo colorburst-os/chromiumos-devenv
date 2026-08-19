@@ -1,0 +1,95 @@
+From b21288c17234c6cc0a656c97ba3332d3dc30f7e1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 08:42:35 -0700
+Subject: [PATCH 2/2] Disable Mirror account consistency: Google sites sign in
+ as plain web
+
+On ChromeOS, Mirror stamps X-Chrome-Connected onto every Google web
+request; Gaia answers a sign-in click with X-Chrome-Manage-Accounts and
+Chrome opens the native add-account dialog -- which on a Gaia-less build
+can only error out. Account consistency is now kDisabled: no header, no
+interception, and youtube.com's Sign in button is an ordinary in-page
+web login. A stray manage-accounts response header is dropped instead
+of DCHECKing.
+---
+ .../account_consistency_mode_manager.cc       | 20 +++++++++----------
+ chrome/browser/signin/chrome_signin_helper.cc | 17 ++++++++++++----
+ 2 files changed, 23 insertions(+), 14 deletions(-)
+
+diff --git a/chrome/browser/signin/account_consistency_mode_manager.cc b/chrome/browser/signin/account_consistency_mode_manager.cc
+index f11db47c92..7beb70e485 100644
+--- a/chrome/browser/signin/account_consistency_mode_manager.cc
++++ b/chrome/browser/signin/account_consistency_mode_manager.cc
+@@ -27,10 +27,6 @@
+ #include "components/signin/public/base/signin_pref_names.h"
+ #include "google_apis/google_api_keys.h"
+ 
+-#if BUILDFLAG(IS_CHROMEOS)
+-#include "chrome/browser/ash/account_manager/account_manager_util.h"
+-#endif
+-
+ #if BUILDFLAG(ENABLE_DICE_SUPPORT) && BUILDFLAG(ENABLE_MIRROR)
+ #error "Dice and Mirror cannot be both enabled."
+ #endif
+@@ -87,12 +83,16 @@ signin::AccountConsistencyMethod ComputeAccountConsistencyMethod(
+   DCHECK(AccountConsistencyModeManager::ShouldBuildServiceForProfile(profile));
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+-  if (!ash::IsAccountManagerAvailable(profile)) {
+-    return AccountConsistencyMethod::kDisabled;
+-  }
+-#endif
+-
+-#if BUILDFLAG(ENABLE_MIRROR)
++  // colorburst: never enable Mirror, even when the Account Manager is
++  // available (upstream returns kMirror below in that case). Mirror stamps
++  // X-Chrome-Connected onto every Google web request; Gaia then answers a
++  // sign-in navigation with X-Chrome-Manage-Accounts, which
++  // chrome_signin_helper.cc turns into the native add-account dialog. On this
++  // Gaia-less build that dialog can only error out. With account consistency
++  // disabled, the header is never attached and signing in on Google web
++  // properties stays an ordinary in-page web flow.
++  return AccountConsistencyMethod::kDisabled;
++#elif BUILDFLAG(ENABLE_MIRROR)
+   return AccountConsistencyMethod::kMirror;
+ #elif BUILDFLAG(ENABLE_DICE_SUPPORT)
+   if (!profile->GetPrefs()->GetBoolean(prefs::kSigninAllowed)) {
+diff --git a/chrome/browser/signin/chrome_signin_helper.cc b/chrome/browser/signin/chrome_signin_helper.cc
+index 56c1b8f805..eb255835c8 100644
+--- a/chrome/browser/signin/chrome_signin_helper.cc
++++ b/chrome/browser/signin/chrome_signin_helper.cc
+@@ -242,9 +242,14 @@ void ProcessMirrorHeader(
+ 
+   Profile* profile =
+       Profile::FromBrowserContext(web_contents->GetBrowserContext());
+-  DCHECK(AccountConsistencyModeManager::IsMirrorEnabledForProfile(profile))
+-      << "Gaia should not send the X-Chrome-Manage-Accounts header "
+-      << "when Mirror is disabled.";
++  // colorburst: upstream DCHECKs here that Mirror is enabled, since Gaia only
++  // sends X-Chrome-Manage-Accounts in reply to X-Chrome-Connected. Mirror is
++  // permanently disabled on this build and the request header is never sent,
++  // but if such a response header ever shows up anyway, drop it instead of
++  // popping native account UI.
++  if (!AccountConsistencyModeManager::IsMirrorEnabledForProfile(profile)) {
++    return;
++  }
+ 
+   // Do not allow non-Google origins to open incognito windows.
+   // TODO(crbug.com/40064889): Expand this check to all Mirror headers,
+@@ -655,7 +660,11 @@ void FixAccountConsistencyRequestHeader(
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+   if (!is_secondary_account_addition_allowed) {
+-    account_consistency = AccountConsistencyMethod::kMirror;
++    // colorburst: upstream forces `account_consistency` to kMirror here so
++    // that the "can't add accounts" restriction reaches Gaia even for
++    // profiles without account consistency. Mirror is permanently disabled on
++    // this Gaia-less build (see ComputeAccountConsistencyMethod), so keep the
++    // computed method instead of re-enabling the X-Chrome-Connected header.
+     // Can't add new accounts.
+     profile_mode_mask |= PROFILE_MODE_ADD_ACCOUNT_DISABLED;
+   }
+-- 
+2.53.0
+

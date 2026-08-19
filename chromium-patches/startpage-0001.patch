@@ -1,0 +1,84 @@
+From 4a252ff277ab83eac88bc81dc6ac8f8d65bb2f23 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 16:14:15 -0700
+Subject: [PATCH 1/2] Fresh profiles open https://start.colorburst.net on
+ session start
+
+Startup type defaults to URLS with the colorburst start page (a default,
+not a policy -- chrome://settings/onStartup stays fully editable). Also
+honor the URLS type for the first tabbed browser of a ChromeOS session:
+under Full Restore the login-time launch is skipped for a profile with
+nothing to restore, and the shelf-click path upstream only handles LAST.
+---
+ chrome/browser/prefs/session_startup_pref.cc | 19 ++++++++++++++++++-
+ chrome/browser/sessions/session_service.cc   | 17 +++++++++++++++++
+ 2 files changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/prefs/session_startup_pref.cc b/chrome/browser/prefs/session_startup_pref.cc
+index dd071315ef..7e36c62fb8 100644
+--- a/chrome/browser/prefs/session_startup_pref.cc
++++ b/chrome/browser/prefs/session_startup_pref.cc
+@@ -62,13 +62,30 @@ void SessionStartupPref::RegisterProfilePrefs(
+   registry->RegisterIntegerPref(prefs::kRestoreOnStartup,
+                                 TypeToPrefValue(GetDefaultStartupType()),
+                                 flags);
++#if BUILDFLAG(IS_CHROMEOS)
++  // NOTE(colorburst fork): a fresh profile's startup pages default to the
++  // colorburst start page (paired with the URLS default type below), so the
++  // first browser window of a session opens it instead of the NTP. This is a
++  // default, not a policy: the user can still change both the startup type
++  // and the URL list in chrome://settings/onStartup.
++  base::ListValue default_startup_urls;
++  default_startup_urls.Append("https://start.colorburst.net/");
++  registry->RegisterListPref(prefs::kURLsToRestoreOnStartup,
++                             std::move(default_startup_urls), flags);
++#else
+   registry->RegisterListPref(prefs::kURLsToRestoreOnStartup, flags);
++#endif
+ }
+ 
+ // static
+ SessionStartupPref::Type SessionStartupPref::GetDefaultStartupType() {
+ #if BUILDFLAG(IS_CHROMEOS)
+-  return SessionStartupPref::LAST;
++  // NOTE(colorburst fork): default to opening the colorburst start page
++  // (upstream: LAST, i.e. restore the previous session). Together with the
++  // kURLsToRestoreOnStartup default registered above, a fresh profile's first
++  // browser window opens https://start.colorburst.net. Users can switch back
++  // to "Continue where you left off" in chrome://settings/onStartup.
++  return SessionStartupPref::URLS;
+ #else
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
+   if (features::kSetDefaultToContinueSession.Get()) {
+diff --git a/chrome/browser/sessions/session_service.cc b/chrome/browser/sessions/session_service.cc
+index db000e3621..048f328fe1 100644
+--- a/chrome/browser/sessions/session_service.cc
++++ b/chrome/browser/sessions/session_service.cc
+@@ -597,6 +597,23 @@ bool SessionService::RestoreIfNecessary(const StartupTabs& startup_tabs,
+       return true;
+     }
+ #if BUILDFLAG(IS_CHROMEOS)
++    // NOTE(colorburst fork): also honor the URLS startup type for the first
++    // browser window of a ChromeOS session (upstream only handles LAST here).
++    // Upstream relied on the login-time StartupBrowserCreator launch to open
++    // startup URLs, but under Full Restore that launch is skipped when there
++    // is nothing to restore, so a fresh profile clicking Chrome in the shelf
++    // would get an NTP instead of the fork's default start page. Only the
++    // !browser case is handled: with a `browser` the caller already created a
++    // window and URL startup pages are not meant to be injected into it.
++    if (!browser && pref.ShouldOpenUrls() && !pref.urls.empty()) {
++      base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
++      StartupBrowserCreator browser_creator;
++      browser_creator.LaunchBrowser(*command_line, profile(), base::FilePath(),
++                                    chrome::startup::IsProcessStartup::kYes,
++                                    chrome::startup::IsFirstRun::kNo,
++                                    /*restore_tabbed_browser=*/true);
++      return true;
++    }
+   } else if (HasPendingUncleanExit(profile())) {
+     if (!browser) {
+       // If 'browser' is null, call StartupBrowserCreator to create a new
+-- 
+2.53.0
+
