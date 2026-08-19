@@ -1,0 +1,24 @@
+From: Lưu Oa Oa <212658678+luuoaoa@users.noreply.github.com>
+Subject: [PATCH] Drop TCVN as a Vietnamese input option
+
+Remove the TCVN (vkd_vi_tcvn) entry from the m17n input-method manifest. TCVN is
+a legacy 8-bit typing convention colorburst does not offer; Telex/VNI/VIQR remain.
+diff --git a/chrome/browser/resources/chromeos/input_method/m17n_manifest.json b/chrome/browser/resources/chromeos/input_method/m17n_manifest.json
+index 8a764ec278..66ce9278e9 100644
+--- a/chrome/browser/resources/chromeos/input_method/m17n_manifest.json
++++ b/chrome/browser/resources/chromeos/input_method/m17n_manifest.json
+@@ -145,14 +145,6 @@
+         "us"
+       ]
+     },
+-    {
+-      "name": "__MSG_keyboard_vietnamese_tcvn__",
+-      "id": "vkd_vi_tcvn",
+-      "language": "vi",
+-      "layouts": [
+-        "us"
+-      ]
+-    },
+     {
+       "name": "__MSG_keyboard_vietnamese_telex__",
+       "id": "vkd_vi_telex",

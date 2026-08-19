@@ -1,0 +1,41 @@
+From: Lưu Oa Oa <212658678+luuoaoa@users.noreply.github.com>
+Subject: [PATCH] Route the m17n IME extension to the native mojo engine (step 0)
+
+Make ash route the m17n input-method extension through NativeInputMethodEngine
+so the first-party mojo IME path (and the UnikeyEngine behind it) actually
+serves physical Vietnamese keystrokes, instead of the keys being handled
+entirely in the component extension's JavaScript. This is the real step-0
+routing fix; it supersedes an earlier throwaway observer-side probe.
+diff --git a/chrome/browser/extensions/api/input_ime/input_ime_api_chromeos.cc b/chrome/browser/extensions/api/input_ime/input_ime_api_chromeos.cc
+index 694d324f88..d9845de187 100644
+--- a/chrome/browser/extensions/api/input_ime/input_ime_api_chromeos.cc
++++ b/chrome/browser/extensions/api/input_ime/input_ime_api_chromeos.cc
+@@ -911,8 +911,27 @@ bool InputImeEventRouter::RegisterImeExtension(
+   }
+ 
+   auto observer = std::make_unique<ImeObserverChromeOS>(extension_id, profile);
++  // Only the first-party input-method component extension is backed by the
++  // native (mojo + IME service) engine; every other extension gets the plain
++  // extension-hosted engine.
++  //
++  // On official Google Chrome builds a single component extension
++  // ("jkghodnilhceideoidjikpgommlajknk") hosts XKB, m17n, Mozc, Pinyin, ... and
++  // kM17nExtensionId is that same id, so this check is unchanged there. On
++  // unbranded ChromiumOS/colorburst builds the m17n rule-based layouts
++  // (vkd_*, including vkd_vi_telex/vkd_vi_vni) live in their *own* extension
++  // (kM17nExtensionId == "jhffeifommiaekmbkkjlpmilogcfdohp"), which previously
++  // fell through to the plain InputMethodEngine. That is why physical
++  // Vietnamese typing was served entirely by the extension's JavaScript and the
++  // C++ mojo path (NativeInputMethodEngineObserver -> ConnectToImeService ->
++  // the sandboxed IME service) never ran. Routing the m17n extension through
++  // NativeInputMethodEngine lets OnActivate() reach ConnectToImeService() for
++  // the vkd_* rule-based family and spawn the IME service. See
++  // internal-knowledge/VIETNAMESE-IME-PERF.md.
++  const bool is_native_ime_extension =
++      extension_id == ash::extension_ime_util::kM17nExtensionId;
+   auto engine =
+-      extension_id == "jkghodnilhceideoidjikpgommlajknk"
++      is_native_ime_extension
+           ? std::make_unique<ash::input_method::NativeInputMethodEngine>()
+           : std::make_unique<InputMethodEngine>();
+   engine->Initialize(std::move(observer), extension_id.c_str(), profile);

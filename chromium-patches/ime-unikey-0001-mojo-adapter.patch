@@ -1,0 +1,93 @@
+From: Lưu Oa Oa <212658678+luuoaoa@users.noreply.github.com>
+Subject: [PATCH] Wire the UniKey engine behind mojom::InputMethod for Vietnamese Telex
+
+Wiring for the vendored UniKey engine (third_party/unikey) and its mojo adapter
+(chromeos/ash/services/ime/unikey_engine.*), both of which apply-unikey.sh drops
+in verbatim from unikey-payload/.
+
+The connection factory that serves the restored rule-based IMEs now routes the
+Vietnamese Telex layout to UnikeyEngine -- which does word-level tone placement
+and non-Vietnamese-word restore that the stateless rule-based tables cannot --
+and leaves every other vkd_* layout on the rule-based engine. BUILD.gn compiles
+unikey_engine.* into the ime "lib" target and depends on //third_party/unikey.
+
+Applied on top of the restored rule-based engine (apply-rulebased.sh): it edits
+that engine's BUILD.gn and rule_based_engine_connection_factory.{cc,h}.
+diff --git a/chromeos/ash/services/ime/BUILD.gn b/chromeos/ash/services/ime/BUILD.gn
+index 36ec5cecbf..9b3e7e22c8 100644
+--- a/chromeos/ash/services/ime/BUILD.gn
++++ b/chromeos/ash/services/ime/BUILD.gn
+@@ -41,6 +41,8 @@ source_set("lib") {
+     "rule_based_engine.h",
+     "rule_based_engine_connection_factory.cc",
+     "rule_based_engine_connection_factory.h",
++    "unikey_engine.cc",
++    "unikey_engine.h",
+     "ime_service.cc",
+     "ime_service.h",
+     "input_method_user_data_service_impl.cc",
+@@ -62,6 +64,7 @@ source_set("lib") {
+     "//chromeos/ash/services/ime/public/cpp/shared_lib:interfaces",
+     "//chromeos/ash/services/ime/public/cpp/shared_lib/proto",
+     "//chromeos/ash/services/ime/public/mojom",
++    "//third_party/unikey",
+   ]
+ }
+ 
+diff --git a/chromeos/ash/services/ime/rule_based_engine_connection_factory.cc b/chromeos/ash/services/ime/rule_based_engine_connection_factory.cc
+index c8568333fc..4c1fd362f7 100644
+--- a/chromeos/ash/services/ime/rule_based_engine_connection_factory.cc
++++ b/chromeos/ash/services/ime/rule_based_engine_connection_factory.cc
+@@ -22,6 +22,18 @@ void RuleBasedEngineConnectionFactory::ConnectToInputMethod(
+         pending_input_method_host,
+     mojom::InputMethodSettingsPtr settings,
+     ConnectToInputMethodCallback callback) {
++  // colorburst PoC: route the Vietnamese Telex layout to the UniKey engine
++  // (word-level tone placement + non-Vietnamese restore), which the stateless
++  // rule-based tables cannot do. All other layouts stay on the rule-based
++  // engine. See internal-knowledge/VIETNAMESE-IME-PERF.md.
++  if (UnikeyEngine::IsImeSupported(ime_spec)) {
++    unikey_engine_ = UnikeyEngine::Create(
++        ime_spec, std::move(pending_input_method),
++        std::move(pending_input_method_host), settings);
++    std::move(callback).Run(/*bound=*/unikey_engine_ != nullptr);
++    return;
++  }
++
+   // `settings` is unused because Rule-Based IMEs do not have settings.
+   rule_based_engine_ =
+       RuleBasedEngine::Create(ime_spec, std::move(pending_input_method),
+@@ -39,6 +51,8 @@ void RuleBasedEngineConnectionFactory::Unused(
+ }
+ 
+ bool RuleBasedEngineConnectionFactory::IsConnected() {
++  if (unikey_engine_ && unikey_engine_->IsConnected())
++    return true;
+   return rule_based_engine_ && rule_based_engine_->IsConnected();
+ }
+ 
+diff --git a/chromeos/ash/services/ime/rule_based_engine_connection_factory.h b/chromeos/ash/services/ime/rule_based_engine_connection_factory.h
+index 90b6a6b50f..74a4cdd403 100644
+--- a/chromeos/ash/services/ime/rule_based_engine_connection_factory.h
++++ b/chromeos/ash/services/ime/rule_based_engine_connection_factory.h
+@@ -13,6 +13,7 @@
+ #include "chromeos/ash/services/ime/public/mojom/input_method_host.mojom.h"
+ #include "chromeos/ash/services/ime/public/mojom/japanese_settings.mojom.h"
+ #include "chromeos/ash/services/ime/rule_based_engine.h"
++#include "chromeos/ash/services/ime/unikey_engine.h"
+ #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+ #include "mojo/public/cpp/bindings/pending_associated_remote.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+@@ -47,9 +48,10 @@ class RuleBasedEngineConnectionFactory : public mojom::ConnectionFactory {
+  private:
+   mojo::Receiver<mojom::ConnectionFactory> receiver_;
+ 
+-  // This connection factory is only ever used to connect to a rule based
+-  // engine.
++  // This connection factory connects to a rule based engine, except for the
++  // Vietnamese Telex layout, which colorburst routes to the UniKey engine.
+   std::unique_ptr<RuleBasedEngine> rule_based_engine_;
++  std::unique_ptr<UnikeyEngine> unikey_engine_;
+ };
+ 
+ }  // namespace ime

@@ -1,0 +1,44 @@
+# Copyright 2026 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# colorburst PoC: the vendored LGPL-2.0-or-later UniKey Vietnamese engine
+# (ukengine) plus the clean-room UTF-8 output layer that replaces upstream's
+# GPL charset/data files. See README.chromium. Productionization note
+# (VIETNAMESE-IME-PERF.md §3.3): this static source_set is fine for the PoC; the
+# LGPL relink obligation is more cleanly discharged by building this as a
+# loadable_module (libukengine.so) and dlopen'ing it from the IME sandbox hook,
+# mirroring libimedecoder.so.
+
+config("unikey_config") {
+  # Mandatory: the engine indexes tables with `char` and assumes it is unsigned.
+  cflags = [
+    "-funsigned-char",
+
+    # The engine's key-classifier tables add enum values of different types
+    # (e.g. `vneCount + vnl_Uh`), which is intrinsic to its design.
+    "-Wno-deprecated-enum-enum-conversion",
+  ]
+}
+
+source_set("unikey") {
+  sources = [
+    "charset.h",
+    "charset_utf8.cpp",
+    "inputproc.cpp",
+    "inputproc.h",
+    "keycons.h",
+    "mactab.h",
+    "mactab_stub.cpp",
+    "ukengine.cpp",
+    "ukengine.h",
+    "vnlexi.h",
+    "vnlexi_tables.cpp",
+  ]
+
+  public_configs = [ ":unikey_config" ]
+
+  # Vendored third-party C++ that does not follow Chromium's warning rules.
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+}

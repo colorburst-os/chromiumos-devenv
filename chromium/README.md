@@ -1,12 +1,13 @@
 # Building colorburst's Chrome
 
-colorburst does not ship stock Chromium. Four things are patched into it, and
-all four are user-visible:
+colorburst does not ship stock Chromium. Several things are patched into it, and
+they are all user-visible:
 
 | Patch | What it does | Doc |
 |---|---|---|
 | `local-account-ui-0001.patch`, `-0002.patch` | the OOBE screen that creates an account with no Google account behind it | [LOCAL-ACCOUNT-UI.md](../LOCAL-ACCOUNT-UI.md) |
 | `0001-restore-rulebased-ime-engine.patch` + `rulebased-payload/` | Chromium's own rule-based IME engine, deleted upstream in M113, restored so Vietnamese Telex types without Google's closed decoder blob | [VIETNAMESE-IME.md](../VIETNAMESE-IME.md) |
+| `apply-unikey.sh` (`unikey-payload/` + `ime-unikey-0001`, `ime-routing-0001`, `ime-tcvn-0001`) | the UniKey Vietnamese engine — word-level tone placement and non-Vietnamese-word restore — behind the mojo IME, with Vietnamese routed to it and legacy TCVN dropped | [VIETNAMESE-IME.md](../VIETNAMESE-IME.md) |
 | `telex-default-0001.patch` | a Vietnamese profile defaults to Telex, not TCVN | [VIETNAMESE-IME.md §7](../VIETNAMESE-IME.md) |
 | `branding-0001.patch` | Chromium → colorburst, Chromebook → computer, and the Google mark off the OOBE screens | [BRANDING.md §6](../BRANDING.md) |
 
@@ -38,6 +39,7 @@ cd "$CHROME/src"                        # apply our patches
 git checkout -b colorburst
 git am ../../chromium-os/chromium-patches/local-account-ui-000*.patch
 ../../chromium-os/chromium-patches/apply-rulebased.sh .     # payload + wiring
+../../chromium-os/chromium-patches/apply-unikey.sh .        # UniKey engine (after rulebased)
 git am ../../chromium-os/chromium-patches/telex-default-0001.patch
 git am ../../chromium-os/chromium-patches/branding-0001.patch
 
