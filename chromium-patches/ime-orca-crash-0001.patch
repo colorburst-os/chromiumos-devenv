@@ -1,0 +1,66 @@
+From d568e806b3602ecc18178f9111ce246ed5b31d5a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Tue, 18 Aug 2026 16:18:09 -0700
+Subject: [PATCH] Fix browser SIGSEGV when activating a vkd_* IME (Orca service
+ removed)
+
+Switching to (or typing in) a rule-based m17n layout could crash ash-chrome
+outright with SIGSEGV at address 0x8 on the UI thread:
+
+  EditorServiceConnector::BindEditor
+  -> mojo::Remote<orca::mojom::...>::operator->  (null: remote was reset)
+  <- EditorMediator::ResetEditorConnections
+  <- EditorMediator::OnActivateIme
+  <- NativeInputMethodEngineObserver::OnActivate
+
+colorburst removed Gemini but not the Orca ("help me write") editor. Its
+backing service is never registered, so content::ServiceProcessHost::Launch
+drops the pipe and reset_on_disconnect() unbinds remote_orca_service_connector_.
+The next IME activation reaches ResetEditorConnections (kOrcaServiceConnection is
+still enabled by default) and calls straight through the now-null remote.
+
+This became reachable for every vkd_* layout once the routing fix sent the whole
+m17n extension through NativeInputMethodEngine (which owns the editor sink); the
+plain InputMethodEngine never invoked the editor path. It is a latent crash for
+the shipping Telex path too, under enough IME switching.
+
+Guard EditorServiceConnector::BindEditor to no-op when the Orca remote is not
+bound. When Orca is actually present (branded builds) this changes nothing.
+
+VERIFIED on device (colorburst R153, instance 2, owner imetail): before, a couple
+of IME switches + typing crashed the browser to a session-restore "Recap" dialog
+(minidump: SIGSEGV 0x8, stack above). After, switching among
+telex/vni/viqr/tcvn/Thai/Arabic and typing in each no longer crashes.
+
+
+
+---
+ .../ash/input_method/editor_service_connector.cc      | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/chrome/browser/ash/input_method/editor_service_connector.cc b/chrome/browser/ash/input_method/editor_service_connector.cc
+index 1fa72a89a0..51c4a27d02 100644
+--- a/chrome/browser/ash/input_method/editor_service_connector.cc
++++ b/chrome/browser/ash/input_method/editor_service_connector.cc
+@@ -38,6 +38,17 @@ void EditorServiceConnector::BindEditor(
+     mojo::PendingAssociatedRemote<orca::mojom::SystemActuator> system_actuator,
+     mojo::PendingAssociatedRemote<orca::mojom::TextQueryProvider>
+         text_query_provider) {
++  // colorburst: the Orca/editor ("help me write") backing service is not
++  // shipped (Gemini removed). content::ServiceProcessHost::Launch then drops
++  // the connection and reset_on_disconnect() unbinds this remote, so calling
++  // through it dereferences a null proxy and SIGSEGVs the browser on the next
++  // IME activation (ResetEditorConnections) -- reached for every vkd_* layout
++  // now that they route through NativeInputMethodEngine's editor sink. Never
++  // call into an unbound service; a no-op guard when Orca is actually present.
++  // See internal-knowledge/VIETNAMESE-IME-PERF.md.
++  if (!IsBound()) {
++    return;
++  }
+   remote_orca_service_connector_->BindEditor(
+       std::move(system_actuator), std::move(text_query_provider),
+       std::move(editor_client_connector), std::move(editor_event_sink),
+-- 
+2.53.0
+

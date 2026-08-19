@@ -1,0 +1,389 @@
+From 3cf26fdd4774fb8ec15d3a444a4c526a1d1c2085 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Tue, 18 Aug 2026 15:52:53 -0700
+Subject: [PATCH] Vietnamese IME: deliver Telex settings live on the mojo
+ rule-based path
+
+The UnikeyEngine (and the recovered rule-based engine) only ever saw their
+settings at connect time, so the os-settings Vietnamese toggles were inert:
+switching "new-style tone placement" did not flip hoaf between hoa-grave and
+hoa-modern without a full IME reconnect. Two latent bugs plus a missing focus
+hop were responsible (VIETNAMESE-IME-PERF.md sec 4.3):
+
+1. CreateSettingsFromPrefs matched only "vkd_vi_telex", but the rule-based mojo
+   path connects with the normalized "m17n:vi_telex" spec, so the Vietnamese
+   settings union was silently never built and the engine came up with defaults.
+   Normalize the m17n: spec back to the vkd_ id for both the predicate match and
+   the per-input-method pref sub-dictionary lookup.
+
+2. RuleBasedEngine::OnFocus reported success=false, which (via OnFocusAck) would
+   have marked the text client inactive and dropped CommitText/SetComposition
+   once focus was actually delivered on this path. Report success.
+
+3. The observer routed rule-based focus/options changes only to the component
+   extension, never to the mojo engine, so OnFocus settings never reached it.
+   Deliver a fresh per-focus settings snapshot to the mojo engine on the
+   rule-based path (without making the text-client active-state depend on its
+   reply, so no other vkd_* layout regresses), and re-deliver it live when the
+   focused field's options change (OnInputMethodOptionsChanged) so a toggle
+   takes effect with no re-focus and no reconnect.
+
+UnikeyEngine now consumes the full Telex settings union: modern/classic tone
+placement (D1), flexible diacritics (freeMarking), and the composition-underline
+pref; it commits any in-flight preedit before re-applying settings mid-word.
+
+VERIFIED on device (colorburst R153, instance 2, owner imetail): with Telex
+active in a textarea, hoaf -> "hoa-grave"; flip new-style in os-settings with the
+field still focused (no refocus, no reconnect) and hoaf -> "hoa-modern"; flip
+back and it returns to "hoa-grave".
+
+
+
+---
+ .../ash/input_method/input_method_settings.cc | 28 ++++++++-
+ .../native_input_method_engine_observer.cc    | 53 +++++++++++++++-
+ .../native_input_method_engine_observer.h     | 13 ++++
+ .../ash/services/ime/rule_based_engine.cc     |  8 ++-
+ chromeos/ash/services/ime/unikey_engine.cc    | 60 ++++++++++++-------
+ chromeos/ash/services/ime/unikey_engine.h     | 12 +++-
+ 6 files changed, 144 insertions(+), 30 deletions(-)
+
+diff --git a/chrome/browser/ash/input_method/input_method_settings.cc b/chrome/browser/ash/input_method/input_method_settings.cc
+index d23ef32c55..8f136e2947 100644
+--- a/chrome/browser/ash/input_method/input_method_settings.cc
++++ b/chrome/browser/ash/input_method/input_method_settings.cc
+@@ -68,6 +68,23 @@ bool IsVietnameseVniEngine(std::string_view engine_id) {
+   return engine_id == "vkd_vi_vni";
+ }
+ 
++// The rule-based mojo path connects using the normalized "m17n:vi_*" spec
++// (NormalizeRuleBasedEngineId), but Vietnamese settings are matched and stored
++// (by the os-settings UI) under the "vkd_vi_*" engine id. Map the normalized
++// spec back so both the predicate match and the per-input-method pref
++// sub-dictionary lookup succeed. Without this the Telex/VNI settings union was
++// silently never built on the mojo path, so the tone-placement toggle was
++// ignored (colorburst: VIETNAMESE-IME-PERF.md §4.3).
++std::string_view NormalizeVietnameseEngineId(std::string_view engine_id) {
++  if (engine_id == "m17n:vi_telex") {
++    return "vkd_vi_telex";
++  }
++  if (engine_id == "m17n:vi_vni") {
++    return "vkd_vi_vni";
++  }
++  return engine_id;
++}
++
+ void RecordSettingsMetrics(const mojom::VietnameseTelexSettings& settings) {
+   base::UmaHistogramBoolean(
+       "InputMethod.PhysicalKeyboard.VietnameseTelex.FlexibleTyping",
+@@ -334,8 +351,13 @@ mojom::InputMethodSettingsPtr CreateSettingsFromPrefs(
+   // until the issue is separately addressed outside the scope of the said
+   // migration. Thus a single Japanese prefs entry with key "nacl_mozc_jp" is
+   // currently used for both "nacl_mozc_jp" and "nacl_mozc_us" input methods.
++  // Accept the normalized "m17n:vi_*" rule-based spec as well as the "vkd_vi_*"
++  // engine id, so Vietnamese settings resolve on both the connect-time and the
++  // per-focus paths (colorburst).
++  std::string_view engine_id_view = NormalizeVietnameseEngineId(engine_id);
++
+   std::string_view lookup_engine_id =
+-      engine_id == kJapaneseUsEngineId ? kJapaneseEngineId : engine_id;
++      engine_id_view == kJapaneseUsEngineId ? kJapaneseEngineId : engine_id_view;
+ 
+   const base::DictValue* ime_prefs_ptr =
+       prefs.GetDict(ash::prefs::kLanguageInputMethodSpecificSettings)
+@@ -361,11 +383,11 @@ mojom::InputMethodSettingsPtr CreateSettingsFromPrefs(
+     return mojom::InputMethodSettings::NewZhuyinSettings(
+         CreateZhuyinSettings(input_method_specific_pref));
+   }
+-  if (IsVietnameseTelexEngine(engine_id)) {
++  if (IsVietnameseTelexEngine(engine_id_view)) {
+     return mojom::InputMethodSettings::NewVietnameseTelexSettings(
+         CreateVietnameseTelexSettings(input_method_specific_pref));
+   }
+-  if (IsVietnameseVniEngine(engine_id)) {
++  if (IsVietnameseVniEngine(engine_id_view)) {
+     return mojom::InputMethodSettings::NewVietnameseVniSettings(
+         CreateVietnameseVniSettings(input_method_specific_pref));
+   }
+diff --git a/chrome/browser/ash/input_method/native_input_method_engine_observer.cc b/chrome/browser/ash/input_method/native_input_method_engine_observer.cc
+index f8d10d5295..cbbf513994 100644
+--- a/chrome/browser/ash/input_method/native_input_method_engine_observer.cc
++++ b/chrome/browser/ash/input_method/native_input_method_engine_observer.cc
+@@ -879,7 +879,21 @@ void NativeInputMethodEngineObserver::OnFocus(
+   if (grammar_manager_->IsOnDeviceGrammarEnabled()) {
+     grammar_manager_->OnFocus(context_id, context.spellcheck_mode);
+   }
+-  if (ShouldRouteToNativeMojoEngine(engine_id)) {
++  if (ShouldRouteToRuleBasedEngine(engine_id)) {
++    // colorburst: the rule-based mojo engine (UnikeyEngine for Vietnamese) is
++    // what serves physical keys, but the framework routes rule-based focus to
++    // the extension. Keep the extension informed for the virtual-keyboard UI
++    // and mark the text client active exactly as before (rule-based
++    // CommitText/SetComposition depend on it) — deliberately not depending on
++    // the mojo OnFocus reply so no other vkd_* layout can regress. Then, in
++    // addition, hand the mojo engine a fresh per-focus settings snapshot so the
++    // Vietnamese tone-placement toggle (and the other Telex/VNI knobs) apply
++    // live on focus rather than only at connect time. See VIETNAMESE-IME-PERF.md
++    // §4.3.
++    ime_base_observer_->OnFocus(engine_id, context_id, context);
++    OnFocusAck(context_id, true, mojom::InputMethodMetadataPtr(nullptr));
++    DeliverSettingsToRuleBasedEngine(engine_id, context);
++  } else if (ShouldRouteToNativeMojoEngine(engine_id)) {
+     if (IsInputMethodBound()) {
+       if (assistive_suggester_.get()) {
+         assistive_suggester_->FetchEnabledSuggestionsFromBrowserContextThen(
+@@ -903,6 +917,30 @@ void NativeInputMethodEngineObserver::OnFocus(
+   }
+ }
+ 
++void NativeInputMethodEngineObserver::DeliverSettingsToRuleBasedEngine(
++    const std::string& engine_id,
++    const TextInputMethod::InputContext& context) {
++  if (!IsInputMethodBound() || !prefs_) {
++    return;
++  }
++  // Remember the focused context so a later os-settings toggle can be pushed
++  // live (OnInputMethodOptionsChanged) without waiting for a re-focus.
++  active_rule_based_engine_id_ = engine_id;
++  focused_context_ = context;
++
++  ime::mojom::InputMethodSettingsPtr settings =
++      CreateSettingsFromPrefs(*prefs_, engine_id);
++  const bool is_normal_screen =
++      InputMethodManager::Get()->GetActiveIMEState()->GetUIStyle() ==
++      InputMethodManager::UIStyle::kNormal;
++  mojom::InputFieldInfoPtr input_field_info = CreateInputFieldInfo(
++      engine_id, context, InputFieldContext{}, prefs_, is_normal_screen);
++  // The active-state bookkeeping was already handled by the synchronous
++  // OnFocusAck above; ignore this reply.
++  input_method_->OnFocus(std::move(input_field_info), std::move(settings),
++                         base::DoNothing());
++}
++
+ void NativeInputMethodEngineObserver::HandleOnFocusAsyncForNativeMojoEngine(
+     const std::string& engine_id,
+     int context_id,
+@@ -961,6 +999,7 @@ void NativeInputMethodEngineObserver::OnBlur(const std::string& engine_id,
+   UpdateCandidatesWindowSync(nullptr);
+ 
+   text_client_ = std::nullopt;
++  focused_context_ = std::nullopt;
+ 
+   if (chromeos::features::IsOrcaEnabled() && editor_event_sink_) {
+     editor_event_sink_->OnBlur();
+@@ -1259,6 +1298,18 @@ void NativeInputMethodEngineObserver::OnSuggestionsChanged(
+ 
+ void NativeInputMethodEngineObserver::OnInputMethodOptionsChanged(
+     const std::string& engine_id) {
++  // colorburst: if a Vietnamese/rule-based field is focused and its options
++  // changed (e.g. the os-settings new-style tone-mark toggle), re-deliver the
++  // settings to the mojo engine now so the change takes effect live, without a
++  // re-focus or IME reconnect. `engine_id` here is the pref sub-dictionary key
++  // that changed (e.g. "vkd_vi_telex"); match it against the focused engine.
++  if (!active_rule_based_engine_id_.empty() && focused_context_.has_value() &&
++      IsInputMethodBound() && text_client_.has_value() &&
++      (engine_id == active_rule_based_engine_id_ ||
++       engine_id == NormalizeRuleBasedEngineId(active_rule_based_engine_id_))) {
++    DeliverSettingsToRuleBasedEngine(active_rule_based_engine_id_,
++                                     *focused_context_);
++  }
+   ime_base_observer_->OnInputMethodOptionsChanged(engine_id);
+ }
+ 
+diff --git a/chrome/browser/ash/input_method/native_input_method_engine_observer.h b/chrome/browser/ash/input_method/native_input_method_engine_observer.h
+index 32bf67a2dd..c490b058da 100644
+--- a/chrome/browser/ash/input_method/native_input_method_engine_observer.h
++++ b/chrome/browser/ash/input_method/native_input_method_engine_observer.h
+@@ -177,6 +177,13 @@ class NativeInputMethodEngineObserver : public InputMethodEngineObserver,
+       const TextInputMethod::InputContext& context,
+       const AssistiveSuggesterSwitch::EnabledSuggestions& enabled_suggestions);
+ 
++  // colorburst: hands the mojo rule-based engine (UnikeyEngine for Vietnamese)
++  // a fresh per-focus settings snapshot so os-settings toggles apply live. The
++  // text client's active state is managed by the caller, not this call's reply.
++  void DeliverSettingsToRuleBasedEngine(
++      const std::string& engine_id,
++      const TextInputMethod::InputContext& context);
++
+   bool IsInputMethodBound();
+   bool IsInputMethodConnected();
+   bool IsTextClientActive();
+@@ -209,6 +216,12 @@ class NativeInputMethodEngineObserver : public InputMethodEngineObserver,
+ 
+   std::optional<TextClient> text_client_;
+ 
++  // colorburst: the currently active rule-based engine id (e.g. "vkd_vi_telex")
++  // and the focused field's input context, retained so a settings change can be
++  // re-delivered to the mojo engine live (see OnInputMethodOptionsChanged).
++  std::string active_rule_based_engine_id_;
++  std::optional<TextInputMethod::InputContext> focused_context_;
++
+   // |use_ime_service| should always be |true| in prod code, and may only be
+   // |false| in browser tests that need to avoid connecting to the Mojo IME
+   // service which can involve loading libimedecoder.so unsupported in tests.
+diff --git a/chromeos/ash/services/ime/rule_based_engine.cc b/chromeos/ash/services/ime/rule_based_engine.cc
+index 05b25ea954..83d7b0bc27 100644
+--- a/chromeos/ash/services/ime/rule_based_engine.cc
++++ b/chromeos/ash/services/ime/rule_based_engine.cc
+@@ -112,7 +112,13 @@ RuleBasedEngine::~RuleBasedEngine() = default;
+ void RuleBasedEngine::OnFocus(mojom::InputFieldInfoPtr input_field_info,
+                               mojom::InputMethodSettingsPtr settings,
+                               OnFocusCallback callback) {
+-  std::move(callback).Run(/*success=*/false,
++  // Rule-based tables have no per-focus settings, but reporting failure here is
++  // wrong: the observer's OnFocusAck uses this to mark the text client active,
++  // which gates CommitText/SetComposition. Report success so a focus delivered
++  // on the mojo rule-based path does not silently disable committing
++  // (colorburst: the Vietnamese UnikeyEngine overrides this and applies its
++  // settings; other vkd_* layouts simply have none to apply).
++  std::move(callback).Run(/*success=*/true,
+                           /*metadata=*/mojom::InputMethodMetadataPtr(nullptr));
+ }
+ 
+diff --git a/chromeos/ash/services/ime/unikey_engine.cc b/chromeos/ash/services/ime/unikey_engine.cc
+index 3944a06b43..d20c97de80 100644
+--- a/chromeos/ash/services/ime/unikey_engine.cc
++++ b/chromeos/ash/services/ime/unikey_engine.cc
+@@ -121,20 +121,15 @@ std::unique_ptr<UnikeyEngine> UnikeyEngine::Create(
+     const mojom::InputMethodSettingsPtr& settings) {
+   if (!IsImeSupported(ime_spec))
+     return nullptr;
+-  bool modern = false;
+-  if (settings && settings->is_vietnamese_telex_settings()) {
+-    modern = settings->get_vietnamese_telex_settings()
+-                 ->new_style_tone_mark_placement;
+-  }
+   return base::WrapUnique(new UnikeyEngine(ime_spec, std::move(receiver),
+-                                           std::move(host), modern));
++                                           std::move(host), settings));
+ }
+ 
+ UnikeyEngine::UnikeyEngine(
+     const std::string& ime_spec,
+     mojo::PendingAssociatedReceiver<mojom::InputMethod> receiver,
+     mojo::PendingAssociatedRemote<mojom::InputMethodHost> host,
+-    bool modern_tone_placement)
++    const mojom::InputMethodSettingsPtr& settings)
+     : receiver_(this, std::move(receiver)),
+       host_(std::move(host)),
+       mem_(std::make_unique<UkSharedMem>()),
+@@ -147,7 +142,7 @@ UnikeyEngine::UnikeyEngine(
+   mem_->usrKeyMapLoaded = false;
+   mem_->charsetId = CONV_CHARSET_XUTF8;
+   mem_->input.setIM(UkTelex);
+-  ApplyOptions(modern_tone_placement);
++  ApplySettings(settings);
+ 
+   engine_->setCtrlInfo(mem_.get());
+   engine_->setCheckKbCaseFunc(
+@@ -161,15 +156,37 @@ UnikeyEngine::UnikeyEngine(
+ 
+ UnikeyEngine::~UnikeyEngine() = default;
+ 
+-void UnikeyEngine::ApplyOptions(bool modern_tone_placement) {
+-  mem_->options.freeMarking = 1;
+-  mem_->options.modernStyle = modern_tone_placement ? 1 : 0;
++void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings) {
++  // Defaults mirror the os-settings pref defaults (see input_method_settings.cc
++  // CreateVietnameseTelexSettings): flexible diacritics on, classic tone
++  // placement, underline shown.
++  bool flexible = true;
++  bool modern = false;
++  bool underline = true;
++  if (settings && settings->is_vietnamese_telex_settings()) {
++    const auto& s = *settings->get_vietnamese_telex_settings();
++    flexible = s.allow_flexible_diacritics;
++    modern = s.new_style_tone_mark_placement;
++    underline = s.show_underline_for_composition_text;
++    // enable_insert_double_horn_on_uo and enable_w_for_u_horn_shortcut are
++    // properties of the Telex input-method definition in UkEngine (processHook
++    // / processTelexW), not runtime UnikeyOptions fields; the vendored engine
++    // applies both unconditionally, matching their default-on prefs.
++  }
++
++  // allow_flexible_diacritics ("free marking"): tone/diacritic keys may be
++  // typed anywhere in the syllable rather than only right after the vowel.
++  mem_->options.freeMarking = flexible ? 1 : 0;
++  // new_style_tone_mark_placement: modern (hoà) vs classic (hòa) — this is D1.
++  mem_->options.modernStyle = modern ? 1 : 0;
+   mem_->options.macroEnabled = 0;
+   mem_->options.spellCheckEnabled = 1;   // needed for the D4 restore logic
+   mem_->options.autoNonVnRestore = 1;    // D4: restore non-Vietnamese words
+   mem_->options.strictSpellCheck = 0;
+   mem_->options.useUnicodeClipboard = 0;
+   mem_->options.alwaysMacro = 0;
++
++  show_underline_ = underline;
+ }
+ 
+ bool UnikeyEngine::IsConnected() {
+@@ -179,16 +196,13 @@ bool UnikeyEngine::IsConnected() {
+ void UnikeyEngine::OnFocus(mojom::InputFieldInfoPtr input_field_info,
+                            mojom::InputMethodSettingsPtr settings,
+                            OnFocusCallback callback) {
+-  // Unlike RuleBasedEngine (which discards settings and reports failure), read
+-  // the Telex tone-placement toggle so D1 is actually configurable.
+-  bool modern = false;
+-  if (settings && settings->is_vietnamese_telex_settings()) {
+-    modern = settings->get_vietnamese_telex_settings()
+-                 ->new_style_tone_mark_placement;
+-  }
+-  ApplyOptions(modern);
+-  engine_->reset();
+-  composition_.clear();
++  // Unlike RuleBasedEngine (which discards settings), read the full Telex
++  // settings union so the os-settings toggles (D1 tone placement, flexible
++  // diacritics, composition underline) apply live on every focus / options
++  // change delivered on the mojo path. Commit any in-flight preedit first so a
++  // mid-word settings change does not strand it.
++  CommitAndReset();
++  ApplySettings(settings);
+   std::move(callback).Run(/*success=*/true,
+                           /*metadata=*/mojom::InputMethodMetadataPtr(nullptr));
+ }
+@@ -206,7 +220,9 @@ void UnikeyEngine::UpdateComposition() {
+   std::u16string text = CodepointsToU16(composition_);
+   std::vector<mojom::CompositionSpanPtr> spans;
+   spans.push_back(mojom::CompositionSpan::New(
+-      0, text.length(), mojom::CompositionSpanStyle::kNone));
++      0, text.length(),
++      show_underline_ ? mojom::CompositionSpanStyle::kDefault
++                      : mojom::CompositionSpanStyle::kNone));
+   const int cursor = text.length();
+   host_->SetComposition(std::move(text), std::move(spans), cursor);
+ }
+diff --git a/chromeos/ash/services/ime/unikey_engine.h b/chromeos/ash/services/ime/unikey_engine.h
+index 6e39263113..f4237096b5 100644
+--- a/chromeos/ash/services/ime/unikey_engine.h
++++ b/chromeos/ash/services/ime/unikey_engine.h
+@@ -74,10 +74,12 @@ class UnikeyEngine : public mojom::InputMethod {
+   UnikeyEngine(const std::string& ime_spec,
+                mojo::PendingAssociatedReceiver<mojom::InputMethod> receiver,
+                mojo::PendingAssociatedRemote<mojom::InputMethodHost> host,
+-               bool modern_tone_placement);
++               const mojom::InputMethodSettingsPtr& settings);
+ 
+-  // Applies engine settings (currently just the modern/classic tone toggle).
+-  void ApplyOptions(bool modern_tone_placement);
++  // Applies the Telex settings union (tone placement, flexible diacritics,
++  // composition underline) onto the engine options; null / non-Telex settings
++  // fall back to the os-settings pref defaults.
++  void ApplySettings(const mojom::InputMethodSettingsPtr& settings);
+ 
+   // Pushes the current composition buffer to the host as a preedit.
+   void UpdateComposition();
+@@ -94,6 +96,10 @@ class UnikeyEngine : public mojom::InputMethod {
+   // shows as preedit). Held uncommitted until a word boundary so the engine's
+   // non-Vietnamese restore (D4) can rewrite it.
+   std::vector<uint32_t> composition_;
++
++  // Whether the composition preedit is shown underlined (the
++  // show_underline_for_composition_text Telex pref).
++  bool show_underline_ = true;
+ };
+ 
+ }  // namespace ime
+-- 
+2.53.0
+

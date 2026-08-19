@@ -1,0 +1,52 @@
+From af698bcc9ce8935d8bd588915618c1494944c79e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sat, 15 Aug 2026 10:26:59 -0700
+Subject: [PATCH] Recommend Telex, not TCVN, as the Vietnamese input method
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A Vietnamese profile came up on TCVN, an encoding-era layout almost nobody
+types with. Everything about it looks right -- the tray says VI, the IME is
+active, keys arrive -- but Telex sequences pass through as plain letters, so
+"tieengs" stays "tieengs". There is nothing on screen to explain it, and the
+four Vietnamese methods are hard to tell apart, so the machine simply looks
+like it cannot type Vietnamese.
+
+The choice comes from one line of kDefaultInputMethodRecommendation in
+input_method_util.cc, consulted before the component extension manager has
+finished loading. Not the region's keyboard list, and not the order of
+m17n_manifest.json -- both of which I changed first, and neither of which had
+any effect.
+
+Verified: a fresh local account now preloads vkd_vi_telex, and typing
+"tieengs Vieejt ddaay nguwowfi" on a hardware keyboard gives
+"tiếng Việt đây người".
+
+
+
+---
+ ui/base/ime/ash/input_method_util.cc | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/ui/base/ime/ash/input_method_util.cc b/ui/base/ime/ash/input_method_util.cc
+index 771e14315c..b1b27fc0b0 100644
+--- a/ui/base/ime/ash/input_method_util.cc
++++ b/ui/base/ime/ash/input_method_util.cc
+@@ -72,7 +72,11 @@ const struct {
+     {"zh-CN", "", "zh-t-i0-pinyin"},
+     {"zh-TW", "", "zh-hant-t-i0-und"},
+     {"th", "", "vkd_th"},
+-    {"vi", "", "vkd_vi_tcvn"},
++    // NOTE(colorburst fork): upstream recommends TCVN. Telex is what
++    // Vietnamese typists overwhelmingly use; TCVN is a legacy encoding-era
++    // layout. Landing a Vietnamese profile on TCVN means Telex sequences
++    // arrive as plain letters, which reads as "typing is broken".
++    {"vi", "", "vkd_vi_telex"},
+     {"ru", "", "xkb:ru::rus"},
+ };
+ 
+-- 
+2.53.0
+

@@ -1,0 +1,44 @@
+From b57a9477f39dc153c145d37d89be7971456cb9f9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sat, 15 Aug 2026 12:43:47 -0700
+Subject: [PATCH] Drop the bare w -> u-horn rule from the Telex table
+
+Mirrors the live JS table in the board overlay. uw/aw/ow keep the horned
+vowels; only the context-free single "w" goes.
+
+
+
+---
+ .../ash/services/ime/public/cpp/rulebased/def/vi_telex.cc | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
+index 8da02fb815..95f038a945 100644
+--- a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
++++ b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
+@@ -44,8 +44,10 @@ const char* kTransforms[] = {
+     "\u01a1",
+     "u\u001d?w",
+     "\u01b0",
+-    "w",
+-    "\u01b0",
++    // NOTE(colorburst fork): upstream also mapped a bare "w" to u-horn. It is
++    // removed: it is the rule that makes English unusable while Vietnamese is
++    // selected (windows -> u-horn indow), and uw/aw/ow still give the horned
++    // vowels. Mirrors the live JS table -- see VIETNAMESE-IME.md 9.
+     "D\u001d?[Dd]",
+     "\u0110",
+     "A\u001d?[aA]",
+@@ -60,8 +62,6 @@ const char* kTransforms[] = {
+     "\u01a0",
+     "U\u001d?[wW]",
+     "\u01af",
+-    "W",
+-    "\u01af",
+     "\u0111\u001dd",
+     "dd",
+     "\u0110\u001dD",
+-- 
+2.53.0
+

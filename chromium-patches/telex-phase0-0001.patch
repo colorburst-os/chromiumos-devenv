@@ -1,0 +1,241 @@
+From 05252ad6f9f3c65e133d2950bf7213f1c73af548 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sat, 15 Aug 2026 11:50:21 -0700
+Subject: [PATCH] Phase 0 Telex rules, and no underline on Vietnamese
+ composition
+
+Two changes, one of which is not where I first put it.
+
+The rule-table additions (tone correction, w-family escape, uo double-horn)
+are here in the C++ rulebased tables for consistency, but the tables that
+actually serve typing are the component extension's JavaScript ones, shipped
+by app-i18n/chromeos-keyboards. That is patched in the board overlay; this
+tree keeps the same rules so the two cannot drift.
+
+The underline is removed in the extension path. Getting there took three
+tries, and the first two are worth recording because they look right and do
+nothing: setting CompositionSpanStyle::kNone in rule_based_engine.cc (wrong
+path), and overriding the thickness of each segment in input_method_engine.cc
+(no segments to override). A probe build settled it -- every SetComposition
+from vkd_vi_telex arrives with segments=0, so Blink falls back to drawing its
+own composition underline. An explicit whole-composition span with
+Thickness::kNone is what suppresses it, and only for the vkd_ engines;
+Chinese and Japanese keep theirs, where a long composition with candidate
+selection needs the signal.
+
+Verified on a VM: 16 Telex sequences produce what a typist expects, and the
+composition draws with no underline.
+
+
+
+---
+ .../ash/input_method/input_method_engine.cc   | 55 +++++++++++++++++++
+ .../ime/public/cpp/rulebased/def/vi_telex.cc  | 33 +++++++++++
+ .../ime/public/cpp/rulebased/def/vi_vni.cc    | 20 ++++++-
+ .../ash/services/ime/rule_based_engine.cc     |  7 ++-
+ 4 files changed, 113 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/ash/input_method/input_method_engine.cc b/chrome/browser/ash/input_method/input_method_engine.cc
+index 0a09d8bb24..8da0d6fdbb 100644
+--- a/chrome/browser/ash/input_method/input_method_engine.cc
++++ b/chrome/browser/ash/input_method/input_method_engine.cc
+@@ -146,6 +146,25 @@ void InputMethodEngine::DiacriticsSettingsChanged() {
+   }
+ }
+ 
++namespace {
++
++// NOTE(colorburst fork): Vietnamese input composes a syllable at a time, so
++// upstream's underline sits under very nearly everything a Vietnamese user
++// types. Windows UniKey, which is what our users are used to, draws nothing.
++//
++// The transliterating input methods are the "vkd_" family; the underline is
++// left alone for everything else, where it still earns its place (Chinese and
++// Japanese compose long runs and the user picks candidates from them).
++//
++// This is applied in the extension path, not in ime_service's rule-based
++// engine, because it is the extension that actually serves these input
++// methods -- see VIETNAMESE-IME.md 9.
++bool HidesCompositionUnderline(const std::string& component_id) {
++  return base::StartsWith(component_id, "vkd_", base::CompareCase::SENSITIVE);
++}
++
++}  // namespace
++
+ const std::string& InputMethodEngine::GetActiveComponentId() const {
+   return active_component_id_;
+ }
+@@ -353,11 +372,37 @@ bool InputMethodEngine::SetComposition(int context_id,
+         continue;
+     }
+ 
++    if (HidesCompositionUnderline(active_component_id_)) {
++      ime_text_span.thickness = ui::ImeTextSpan::Thickness::kNone;
++      ime_text_span.underline_style = ui::ImeTextSpan::UnderlineStyle::kNone;
++    }
++
+     ime_text_span.start_offset = segment.start;
+     ime_text_span.end_offset = segment.end;
+     composition_text.ime_text_spans.push_back(ime_text_span);
+   }
+ 
++  // NOTE(colorburst fork): the transliterating "vkd_" engines send no segments
++  // at all (verified on a VM: every SetComposition from vkd_vi_telex arrives
++  // with segments=0). With no spans, Blink falls back to drawing its own
++  // composition underline, which is why setting styles above changes nothing.
++  // An explicit span covering the whole composition is what actually
++  // suppresses it.
++  //
++  // Vietnamese composes one syllable at a time, so that underline sits under
++  // very nearly everything the user types; Windows UniKey, which is what our
++  // users are used to, draws nothing. The cost is that the only visual signal
++  // that text is still uncommitted is gone.
++  if (composition_text.ime_text_spans.empty() &&
++      HidesCompositionUnderline(active_component_id_)) {
++    ui::ImeTextSpan span(ui::ImeTextSpan::Type::kComposition, 0,
++                         static_cast<uint32_t>(utf16_length),
++                         ui::ImeTextSpan::Thickness::kNone,
++                         ui::ImeTextSpan::UnderlineStyle::kNone);
++    span.underline_color = SK_ColorTRANSPARENT;
++    composition_text.ime_text_spans.push_back(span);
++  }
++
+   // TODO(nona): Makes focus out mode configuable, if necessary.
+   UpdateComposition(composition_text, cursor, true);
+   return true;
+@@ -401,6 +446,11 @@ bool InputMethodEngine::SetCompositionRange(
+         break;
+     }
+ 
++    if (HidesCompositionUnderline(active_component_id_)) {
++      text_span.thickness = ui::ImeTextSpan::Thickness::kNone;
++      text_span.underline_style = ui::ImeTextSpan::UnderlineStyle::kNone;
++    }
++
+     text_span.start_offset = segment.start;
+     text_span.end_offset = segment.end;
+     text_spans.push_back(text_span);
+@@ -464,6 +514,11 @@ bool InputMethodEngine::SetComposingRange(
+         break;
+     }
+ 
++    if (HidesCompositionUnderline(active_component_id_)) {
++      text_span.thickness = ui::ImeTextSpan::Thickness::kNone;
++      text_span.underline_style = ui::ImeTextSpan::UnderlineStyle::kNone;
++    }
++
+     text_span.start_offset = segment.start;
+     text_span.end_offset = segment.end;
+     text_spans.push_back(text_span);
+diff --git a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
+index bc7ad3c566..8da02fb815 100644
+--- a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
++++ b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
+@@ -11,6 +11,25 @@ namespace vi_telex {
+ const char* kId = "vi_telex";
+ bool kIs102 = false;
+ const char* kTransforms[] = {
++    // NOTE(colorburst fork): five rules upstream's table never had. See
++    // VIETNAMESE-ENGINE.md 1.5 for the measurements behind each.
++    //
++    // "uo" + w puts the horn on BOTH vowels, which is what a Telex typist
++    // means: nguowfi -> nguoi with two horns -> "nguoi". Without this the
++    // typist has to type the second w explicitly (nguwowfi).
++    "[uU]\u001d?[oO]\u001d?[wW]",
++    "\u01b0\u01a1",
++    "[uU]\u001d?[oO]\u001d?[nN]\u001d?[gG]\u001d?[wW]",
++    "\u01b0\u01a1ng",
++    // Double-typing a modifier escapes it. That already worked for dd/aa/ee/oo
++    // and for the tone keys, but not for the w family: uww gave "uu-horn"
++    // instead of the literal "uw" the typist asked for.
++    "\u01b0\u001d[wW]",
++    "uw",
++    "\u0103\u001d[wW]",
++    "aw",
++    "\u01a1\u001d[wW]",
++    "ow",
+     "d\u001d?d",
+     "\u0111",
+     "a\u001d?a",
+@@ -106,6 +125,20 @@ const char* kTransforms[] = {
+     "\\2\\3",
+     "(\u0323)([a-zA-Z\u001d]*)([jJ])",
+     "\\2\\3",
++    // Retyping a different tone REPLACES the one already there, rather than
++    // stacking a second diacritic on the syllable: hoafs was "hoa" with both
++    // grave and acute, and is now "hoa" with acute. Each rule matches the four
++    // tones that are not the one being typed.
++    "^(.*)([\u0301\u0309\u0303\u0323])([a-zA-Z\u001d]*)([fF])",
++    "\\1\u0300\\3",
++    "^(.*)([\u0300\u0309\u0303\u0323])([a-zA-Z\u001d]*)([sS])",
++    "\\1\u0301\\3",
++    "^(.*)([\u0300\u0301\u0303\u0323])([a-zA-Z\u001d]*)([rR])",
++    "\\1\u0309\\3",
++    "^(.*)([\u0300\u0301\u0309\u0323])([a-zA-Z\u001d]*)([xX])",
++    "\\1\u0303\\3",
++    "^(.*)([\u0300\u0301\u0309\u0303])([a-zA-Z\u001d]*)([jJ])",
++    "\\1\u0323\\3",
+     "(([qQ][uU]|[gG][iI])?[aeiouyAEIOUY]+)([\u0300\u0301\u0303\u0309\u0323])"
+     "\u001d?([aeiouyAEIOUY])\u001d?([a-eg-ik-qtuvyA-EG-IK-QTUVY])",
+     "\\1\\4\\3\\5",
+diff --git a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc
+index 262b206f4e..917b1c79b4 100644
+--- a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc
++++ b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc
+@@ -23,6 +23,11 @@ const char* kTransforms[] = {
+     "\\1\u00f4",
+     "(\\w*)a\u001d?8",
+     "\\1\u0103",
++    // NOTE(colorburst fork): the VNI analogues of the Telex additions in
++    // vi_telex.cc. uo + 7 horns both vowels, so nguo7i2 gives what a
++    // Vietnamese typist means rather than a horn on the o alone.
++    "(\\w*)[uU]\u001d?[oO]\u001d?7",
++    "\\1\u01b0\u01a1",
+     "(\\w*)o\u001d?7",
+     "\\1\u01a1",
+     "(\\w*)u\u001d?7",
+@@ -80,7 +85,20 @@ const char* kTransforms[] = {
+     "([\u0300\u0301\u0303\u0309\u0323])(["
+     "\u0103\u00e2\u00ea\u00f4\u01a1\u01b0\u0102\u00c2\u00ca\u00d4\u01a0\u01af"
+     "])\u001d?([a-zA-Z])",
+-    "\\2\\1\\3"};
++    "\\2\\1\\3",
++    // NOTE(colorburst fork): retyping a tone digit replaces the tone already on
++    // the syllable instead of stacking a second diacritic. Same five rules as
++    // Telex; see VIETNAMESE-ENGINE.md 1.5.
++    "^(.*)([\u0301\u0309\u0303\u0323])([a-zA-Z\u001d]*)(2)",
++    "\\1\u0300\\3",
++    "^(.*)([\u0300\u0309\u0303\u0323])([a-zA-Z\u001d]*)(1)",
++    "\\1\u0301\\3",
++    "^(.*)([\u0300\u0301\u0303\u0323])([a-zA-Z\u001d]*)(3)",
++    "\\1\u0309\\3",
++    "^(.*)([\u0300\u0301\u0309\u0323])([a-zA-Z\u001d]*)(4)",
++    "\\1\u0303\\3",
++    "^(.*)([\u0300\u0301\u0309\u0303])([a-zA-Z\u001d]*)(5)",
++    "\\1\u0323\\3"};
+ const unsigned int kTransformsLen = std::size(kTransforms);
+ const char* kHistoryPrune = nullptr;
+ 
+diff --git a/chromeos/ash/services/ime/rule_based_engine.cc b/chromeos/ash/services/ime/rule_based_engine.cc
+index 955e9bfdc3..05b25ea954 100644
+--- a/chromeos/ash/services/ime/rule_based_engine.cc
++++ b/chromeos/ash/services/ime/rule_based_engine.cc
+@@ -59,8 +59,13 @@ mojom::KeyEventResult HandleEngineResult(
+       (result.key_handled && result.commit_text.empty())) {
+     std::u16string text = ConvertToUtf16AndNormalize(result.composition_text);
+     std::vector<mojom::CompositionSpanPtr> spans;
++    // NOTE(colorburst fork): kNone, not kDefault, to match the extension path
++    // (input_method_engine.cc), which is where Vietnamese composition actually
++    // goes today -- see VIETNAMESE-IME.md 9. Changing it here does NOT remove
++    // the underline on its own; this file is kept consistent so the two paths
++    // do not disagree if routing ever changes.
+     spans.push_back(mojom::CompositionSpan::New(
+-        0, text.length(), mojom::CompositionSpanStyle::kDefault));
++        0, text.length(), mojom::CompositionSpanStyle::kNone));
+     const int new_cursor_position = text.length();
+     host->SetComposition(std::move(text), std::move(spans),
+                          new_cursor_position);
+-- 
+2.53.0
+

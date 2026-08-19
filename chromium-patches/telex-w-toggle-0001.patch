@@ -1,0 +1,213 @@
+From 7335b0e0d666b018f98e26f44cb7d3187755aded Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Tue, 18 Aug 2026 16:43:48 -0700
+Subject: [PATCH] =?UTF-8?q?Vietnamese=20Telex:=20make=20the=20standalone-w?=
+ =?UTF-8?q?=20->=20=C6=B0=20shortcut=20a=20real=20toggle,=20default=20off?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The os-settings "type w for u-horn" toggle (enable_w_for_u_horn_shortcut) existed
+end to end but the engine ignored it: a standalone Telex 'w' with no vowel to
+hook always mapped to 'ư', which mangles English words that start with w
+(windows -> ưindows). Wire the toggle through and default it off.
+
+- UkEngine::processTelexW: the map-to-u-horn fallback for a bare 'w' (and its
+  usedAsMapChar twin) is now gated on a new runtime option
+  UnikeyOptions.bareWToUHorn; when off, the bare 'w' is appended as a literal
+  'w'. uw/aw/ow are untouched — they hook a real vowel and succeed in
+  processHook before the fallback, so they keep producing ư/ă/ơ in both states.
+  Noted as a colorburst modification in third_party/unikey/README.chromium.
+- unikey_engine.cc ApplySettings now reads s.enable_w_for_u_horn_shortcut into
+  bareWToUHorn (was hardcoded/ignored), so the toggle applies live on the same
+  focus/options-changed seam as the other Telex settings.
+- input_method_settings.cc CreateVietnameseTelexSettings and the os-settings UI
+  default (input_method_prefs_defaults.ts) both default the pref to false so the
+  switch reads off and matches the engine.
+
+VERIFIED on device (colorburst R153, instance 2, owner imetail), flipping the
+toggle in os-settings with the field still focused (no refocus, no reconnect):
+  OFF (default):  w->w, uw->ư, aw->ă, ow->ơ, nguwowfi->người, windows->windows
+  ON:             w->ư, uw->ư, aw->ă, ow->ơ, nguwowfi->người
+  flipped OFF:    w->w, uw->ư, windows->windows
+Regression battery unchanged: 23/23 oracle-match, 6 expected divergences, 0 fails.
+
+
+
+---
+ .../ash/input_method/input_method_settings.cc |  5 ++-
+ .../input_method_prefs_defaults.ts            |  5 ++-
+ chromeos/ash/services/ime/unikey_engine.cc    | 12 ++++---
+ third_party/unikey/README.chromium            | 12 ++++++-
+ third_party/unikey/keycons.h                  |  5 +++
+ third_party/unikey/ukengine.cpp               | 34 +++++++++++++------
+ 6 files changed, 56 insertions(+), 17 deletions(-)
+
+diff --git a/chrome/browser/ash/input_method/input_method_settings.cc b/chrome/browser/ash/input_method/input_method_settings.cc
+index 8f136e2947..4ae13e932a 100644
+--- a/chrome/browser/ash/input_method/input_method_settings.cc
++++ b/chrome/browser/ash/input_method/input_method_settings.cc
+@@ -149,9 +149,12 @@ mojom::VietnameseTelexSettingsPtr CreateVietnameseTelexSettings(
+   settings->enable_insert_double_horn_on_uo =
+       input_method_specific_pref.FindBool(kVnPrefTelexInsertDoubleHornOnUo)
+           .value_or(false);
++  // colorburst: default OFF. A standalone 'w' mapping to 'ư' mangles English
++  // words that start with w (windows -> ưindows); the shortcut is opt-in
++  // (commit b57a9477f3). The engine honors this via UnikeyOptions.bareWToUHorn.
+   settings->enable_w_for_u_horn_shortcut =
+       input_method_specific_pref.FindBool(kVnPrefTelexInsertUHornOnW)
+-          .value_or(true);
++          .value_or(false);
+   settings->show_underline_for_composition_text =
+       input_method_specific_pref.FindBool(kVnPrefTelexShowUnderline)
+           .value_or(true);
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
+index 0574e8808c..c5d741b64d 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
+@@ -68,6 +68,9 @@ export const OPTION_DEFAULT = {
+   [OptionType.VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS]: true,
+   [OptionType.VIETNAMESE_TELEX_NEW_STYLE_TONE_MARK_PLACEMENT]: false,
+   [OptionType.VIETNAMESE_TELEX_INSERT_DOUBLE_HORN_ON_UO]: false,
+-  [OptionType.VIETNAMESE_TELEX_INSERT_U_HORN_ON_W]: true,
++  // colorburst: default OFF so the os-settings toggle reads off and matches the
++  // pref default in input_method_settings.cc (standalone w -> u-horn is opt-in
++  // because it mangles English w-words). See VIETNAMESE-IME-PERF.md.
++  [OptionType.VIETNAMESE_TELEX_INSERT_U_HORN_ON_W]: false,
+   [OptionType.VIETNAMESE_TELEX_SHOW_UNDERLINE]: true,
+ } satisfies Partial<Record<OptionType, unknown>>;
+diff --git a/chromeos/ash/services/ime/unikey_engine.cc b/chromeos/ash/services/ime/unikey_engine.cc
+index d20c97de80..2d62a68a35 100644
+--- a/chromeos/ash/services/ime/unikey_engine.cc
++++ b/chromeos/ash/services/ime/unikey_engine.cc
+@@ -163,15 +163,15 @@ void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings)
+   bool flexible = true;
+   bool modern = false;
+   bool underline = true;
++  bool w_for_u_horn = false;  // default off — bare 'w' stays a literal 'w'
+   if (settings && settings->is_vietnamese_telex_settings()) {
+     const auto& s = *settings->get_vietnamese_telex_settings();
+     flexible = s.allow_flexible_diacritics;
+     modern = s.new_style_tone_mark_placement;
+     underline = s.show_underline_for_composition_text;
+-    // enable_insert_double_horn_on_uo and enable_w_for_u_horn_shortcut are
+-    // properties of the Telex input-method definition in UkEngine (processHook
+-    // / processTelexW), not runtime UnikeyOptions fields; the vendored engine
+-    // applies both unconditionally, matching their default-on prefs.
++    w_for_u_horn = s.enable_w_for_u_horn_shortcut;
++    // enable_insert_double_horn_on_uo is a property of the Telex definition in
++    // UkEngine (processHook) and is applied unconditionally.
+   }
+ 
+   // allow_flexible_diacritics ("free marking"): tone/diacritic keys may be
+@@ -179,6 +179,10 @@ void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings)
+   mem_->options.freeMarking = flexible ? 1 : 0;
+   // new_style_tone_mark_placement: modern (hoà) vs classic (hòa) — this is D1.
+   mem_->options.modernStyle = modern ? 1 : 0;
++  // enable_w_for_u_horn_shortcut: when on, a standalone 'w' (no vowel to hook)
++  // maps to 'ư'; when off it stays a literal 'w' so English w-words survive.
++  // uw/aw/ow are unaffected either way (they hook a real vowel). Default off.
++  mem_->options.bareWToUHorn = w_for_u_horn ? 1 : 0;
+   mem_->options.macroEnabled = 0;
+   mem_->options.spellCheckEnabled = 1;   // needed for the D4 restore logic
+   mem_->options.autoNonVnRestore = 1;    // D4: restore non-Vietnamese words
+diff --git a/third_party/unikey/README.chromium b/third_party/unikey/README.chromium
+index 3b51921001..840c0b4776 100644
+--- a/third_party/unikey/README.chromium
++++ b/third_party/unikey/README.chromium
+@@ -28,12 +28,22 @@ Local Modifications:
+ Only the LGPL-2.0-or-later engine core is taken. The GPL-2.0-or-later files of the
+ upstream tree (charset.cpp, data.cpp, convert.cpp, byteio.cpp, pattern.cpp,
+ keycons.h, vnconv.h, and the fcitx5 glue unikeyinputcontext.*) are NOT vendored.
+-Files taken verbatim from upstream (unchanged, LGPL-2.0-or-later):
++Files taken from upstream (LGPL-2.0-or-later):
+   - ukengine.cpp, ukengine.h   (the state machine)
+   - inputproc.cpp, inputproc.h (key -> linguistic-event classifier; Telex/VNI/...)
+   - mactab.h                   (macro-table interface; gõ tắt)
+   - vnlexi.h                   (the Vietnamese lexical alphabet enum)
+ 
++colorburst modifications to the upstream engine (kept minimal; all under the
++same LGPL-2.0-or-later):
++  - ukengine.cpp UkEngine::processTelexW: the fallback that maps a standalone
++    'w' (no vowel to hook) to 'ư' is gated on a new runtime option
++    (UnikeyOptions.bareWToUHorn); when off, the bare 'w' is appended as a
++    literal 'w'. Backs the os-settings "type w for u-horn" toggle (default off,
++    because bare-w->ư mangles English words that start with w). The uw/aw/ow
++    hook cases are untouched — they succeed in processHook and never reach the
++    fallback. keycons.h gains the matching bareWToUHorn option field.
++
+ Files added by colorburst to sever the GPL coupling (all authored by us, and, so
+ that they may be freely combined with the LGPL engine, released under
+ LGPL-2.0-or-later):
+diff --git a/third_party/unikey/keycons.h b/third_party/unikey/keycons.h
+index b9f4df7151..28502e5f61 100644
+--- a/third_party/unikey/keycons.h
++++ b/third_party/unikey/keycons.h
+@@ -41,6 +41,11 @@ struct UnikeyOptions {
+     int useIME;
+     int spellCheckEnabled;
+     int autoNonVnRestore;
++    // colorburst modification (see README.chromium): when 0, a standalone Telex
++    // 'w' with no vowel to hook stays a literal 'w' instead of mapping to 'ư'.
++    // The uw/aw/ow hook cases succeed in processHook and are unaffected. This
++    // backs the os-settings "type w for u-horn" toggle; default 0 (off).
++    int bareWToUHorn;
+ };
+ 
+ typedef enum { UkCharOutput, UkKeyOutput } UkOutputType;
+diff --git a/third_party/unikey/ukengine.cpp b/third_party/unikey/ukengine.cpp
+index a0e782f6ad..7885d7c0e5 100644
+--- a/third_party/unikey/ukengine.cpp
++++ b/third_party/unikey/ukengine.cpp
+@@ -1759,7 +1759,14 @@ int UkEngine::processTelexW(UkKeyEvent &ev) {
+     if (m_keyCheckFunc)
+         m_keyCheckFunc(&shiftPressed, &capsLockOn);
+ 
+-    if (usedAsMapChar) {
++    // colorburst modification (see README.chromium): the map-to-u-horn fallback
++    // for a bare 'w' (and its usedAsMapChar twin) is gated on bareWToUHorn. When
++    // off, a standalone 'w' is appended as a literal 'w'. The uw/aw/ow cases
++    // succeed in processHook below and return before the fallback, so they keep
++    // producing ư/ă/ơ regardless of this option.
++    const bool bareWToUHorn = m_pCtrl->options.bareWToUHorn;
++
++    if (usedAsMapChar && bareWToUHorn) {
+         ev.evType = vneMapChar;
+         ev.vnSym = isupper(ev.keyCode) ? vnl_Uh : vnl_uh;
+         if (capsLockOn)
+@@ -1780,15 +1787,22 @@ int UkEngine::processTelexW(UkKeyEvent &ev) {
+     usedAsMapChar = false;
+     ret = processHook(ev);
+     if (ret == 0) {
+-        if (m_current >= 0)
+-            m_current--;
+-        ev.evType = vneMapChar;
+-        ev.vnSym = isupper(ev.keyCode) ? vnl_Uh : vnl_uh;
+-        if (capsLockOn)
+-            ev.vnSym = changeCase(ev.vnSym);
+-        ev.chType = ukcVn;
+-        usedAsMapChar = true;
+-        return processMapChar(ev);
++        if (bareWToUHorn) {
++            if (m_current >= 0)
++                m_current--;
++            ev.evType = vneMapChar;
++            ev.vnSym = isupper(ev.keyCode) ? vnl_Uh : vnl_uh;
++            if (capsLockOn)
++                ev.vnSym = changeCase(ev.vnSym);
++            ev.chType = ukcVn;
++            usedAsMapChar = true;
++            return processMapChar(ev);
++        }
++        // Toggle off: keep the standalone 'w' as a literal 'w'.
++        ev.evType = vneNormal;
++        ev.chType = m_pCtrl->input.getCharType(ev.keyCode);
++        ev.vnSym = IsoToVnLexi(ev.keyCode);
++        return processAppend(ev);
+     }
+     return ret;
+ }
+-- 
+2.53.0
+
