@@ -1,0 +1,15 @@
+# The ChromiumOS `repo` checkout (176 GB across 287 projects) is managed by
+# `repo` against the upstream manifest, not by this repository. It is
+# reconstructed with `repo init`/`repo sync` plus local_manifests/ and
+# pinned-manifest.xml -- see README.md.
+#
+# Exception: the two helper scripts that must physically live inside the
+# checkout, because cros_sdk mounts it at /mnt/host/source and can only run
+# scripts from there.
+/chromiumos/*
+!/chromiumos/vm_shell.sh
+!/chromiumos/vm_smoke_test.sh
+
+# Claude Code local settings (machine-specific absolute paths)
+.claude/settings.local.json
+tools/__pycache__/
