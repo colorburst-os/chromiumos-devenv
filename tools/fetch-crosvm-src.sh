@@ -6,6 +6,10 @@
 #
 # minigbm/minijail are pinned to the SHAs from pinned-manifest.xml (the last
 # known-good full checkout); crosvm tracks our fork's branch.
+#
+# NOTE: the crosvm clone comes from the PRIVATE colorburst-os org fork below.
+# You need org membership and the gh credential helper (`gh auth setup-git`)
+# for the clone to succeed; anonymous access is 404.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,9 +38,12 @@ fetch_pinned() { # url sha dest
 fetch_pinned "$MINIGBM_URL"  "$MINIGBM_SHA"  "$P/minigbm"
 fetch_pinned "$MINIJAIL_URL" "$MINIJAIL_SHA" "$P/minijail"
 
-# The repo checkout ships third_party/minijail as an empty stub; point it at
-# the real clone (relative, so it works from any mount point).
-ln -sfn ../../minijail "$P/crosvm/third_party/minijail"
+# The repo checkout ships third_party/minijail as an empty stub DIRECTORY;
+# point it at the real clone (relative, so it works from any mount point).
+# `ln -sfn` into an existing directory would nest the link inside it
+# (third_party/minijail/minijail) rather than replace it, so remove it first.
+rm -rf "$P/crosvm/third_party/minijail"
+ln -s ../../minijail "$P/crosvm/third_party/minijail"
 
 echo ">>> done: crosvm sources ready under chromiumos/src/platform/"
 echo ">>> next: the one-time build in RUNNING-VM.md step 3"

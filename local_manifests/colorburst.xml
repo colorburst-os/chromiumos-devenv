@@ -24,7 +24,9 @@
   <project name="crosvm" path="src/platform/crosvm" remote="colorburst"
            revision="refs/heads/colorburst/gpu-display" groups="crosvm" />
 
-  <!-- overlay-amd64-generic: virgl in VIDEO_CARDS -->
+  <!-- board-overlays: carries overlay-colorburst (the colorburst appid,
+       /etc/os-release fields, and Gaia-less session_manager flags). Video
+       (virgl) is inherited from the reven:base profile, not set here. -->
   <remove-project name="chromiumos/overlays/board-overlays" />
   <project name="board-overlays" path="src/overlays" remote="colorburst"
            revision="refs/heads/colorburst/virgl"

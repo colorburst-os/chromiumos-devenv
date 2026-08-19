@@ -20,19 +20,27 @@ and the notes behind every decision.
 | `docker/crosvm/Dockerfile` | `cros-crosvm` image: Rust toolchain + wayland/virgl dev libs to build crosvm, plus dnsmasq/iptables for VM networking |
 | `chromiumos/` | The source checkout + SDK chroot + built images (bind-mounted into every container) |
 | `chromium/` | Chrome-side build tooling: fetch a Chromium tree, build it, deploy it to a running VM, cut an image. See [chromium/README.md](chromium/README.md) |
-| `chromium-patches/` | The four patches that make Chromium into colorburst's Chrome, plus the 86-file rule-based IME payload |
+| `chromium-patches/` | The ~25-patch series that makes Chromium into colorburst's Chrome, plus the rule-based IME and UniKey payloads. Applied in order by `chromium-patches/apply-all.sh` — see [chromium/README.md](chromium/README.md) |
 | `tools/` | `vm-instance.sh` (isolated VMs), `cdp.py` (drive Chrome over DevTools), `guest-type.py` (type on a real keyboard device in the guest), `pak.py`, `local-account-walk.sh` |
 
 ## Quick start
 
 ```bash
-# Build. This builds our patched Chrome, then the BSP package, then an image.
+# 0. Sync the ChromiumOS tree (see "Reproducing the checkout" below) and fetch
+#    the Chromium source + apply the patch series (see chromium/README.md).
+
+# 1. Bootstrap the board sysroot ONCE per checkout: setup_board + a full
+#    build-packages. The first cros_sdk call here also creates the SDK chroot,
+#    so this step is slow (hours) the first time. build-image.sh assumes it.
+chromium/bootstrap-board.sh
+
+# 2. Build. This builds our patched Chrome, then the BSP package, then an image.
 # 2-3 h cold, ~10 min warm.  NEVER plain `cros build-packages`: it force-fetches
 # Chrome from the binhost and throws our patches away. See chromium/README.md.
 chromium/build-image.sh
 
-# Run (see RUNNING-VM.md for the from-scratch guide)
-CROS_VM_SCSI=1 ./run-crosvm.sh   # crosvm, GPU window + network (colorburst images need CROS_VM_SCSI=1)
+# 3. Run (see RUNNING-VM.md for the from-scratch guide)
+./run-crosvm.sh   # crosvm, GPU window + network; CROS_VM_SCSI defaults on for colorburst
 ```
 
 All VMs: `ssh -p 9222 root@localhost`, password `test0000`.
@@ -91,11 +99,27 @@ our own forks:
 | Fork | Upstream | Patch |
 |---|---|---|
 | `colorburst-os/crosvm` | `chromiumos/platform/crosvm` | branch `colorburst/gpu-display` — window decorations, configurable display scale, pointer coordinate scaling |
-| `colorburst-os/board-overlays` | `chromiumos/overlays/board-overlays` | branch `colorburst/virgl` — `virgl` in `VIDEO_CARDS`, the colorburst appid and `/etc/os-release` fields, and the Gaia-less session_manager flags |
+| `colorburst-os/board-overlays` | `chromiumos/overlays/board-overlays` | branch `colorburst/virgl` — the colorburst appid and `/etc/os-release` fields, and the Gaia-less session_manager flags (video comes from `reven:base`, not this overlay) |
+
+**Access prerequisite:** the two forks live in the **private** `colorburst-os`
+GitHub org. Authorized builders reach them over HTTPS with the `gh` credential
+helper (`gh auth setup-git`) once they are a member of the org — the local
+manifest below fetches them by `https://github.com/colorburst-os/…`. Without
+org access `repo sync` cannot check them out, and the tree cannot be assembled.
+
+Sync the **exact pinned tree** the patch series targets (Chromium r153). The
+`-b stable` branch is a *moving* target and will drift from the pinned SHAs, so
+reproduce byte-for-byte via `pinned-manifest.xml`:
 
 ```bash
 mkdir chromiumos && cd chromiumos
-repo init -u https://chromium.googlesource.com/chromiumos/manifest -b stable
+# 1. Init any manifest first, so .repo/manifests exists as a git repo.
+repo init -u https://chromium.googlesource.com/chromiumos/manifest
+# 2. Drop the pinned manifest in and re-init against it. pinned-manifest.xml is
+#    a bare file (not in a manifest git repo), so it must be copied inside.
+cp ../pinned-manifest.xml .repo/manifests/
+repo init -m pinned-manifest.xml
+# 3. Install the local manifest that swaps crosvm/board-overlays to the forks.
 mkdir -p .repo/local_manifests
 ln -s ../../../local_manifests/colorburst.xml .repo/local_manifests/
 repo sync -j8
@@ -104,11 +128,15 @@ repo sync -j8
 `local_manifests/colorburst.xml` swaps those two projects to the forks;
 everything else still comes from upstream.
 
-`pinned-manifest.xml` records the exact SHA of all 287 projects as of the
-last known-good build. To reproduce that tree byte for byte, pass it to
-`repo init -m` instead. Note it pins crosvm and board-overlays to commits
-that exist only in our forks, so it needs the local manifest (or the forks
-fetched) to resolve.
+`pinned-manifest.xml` records the exact SHA of all 287 projects as of the last
+known-good build. **The local manifest is authoritative for the two forks:** it
+overrides crosvm and board-overlays to *branch refs*
+(`refs/heads/colorburst/gpu-display`, `refs/heads/colorburst/virgl`), so the
+fork SHAs baked into `pinned-manifest.xml` are advisory only — the branch tip
+resolves, not the pinned SHA, and the two can differ. For the ~285 upstream
+projects the pinned SHA is exact. Because those fork revisions exist only in our
+forks, the pinned manifest needs the local manifest (or the forks fetched) to
+resolve at all.
 
 Each fork keeps upstream as a remote named `cros`. The patches are
 un-upstreamed and touch files upstream actively changes, so expect to
@@ -121,6 +149,9 @@ git fetch cros && git rebase cros/chromeos   # in src/platform/crosvm
 ## The one thing to never forget
 
 **GPU-accelerated graphics require the *image* to contain the virgl Mesa
-driver.** `overlay-amd64-generic/profiles/base/make.defaults` must have
-`virgl` in `VIDEO_CARDS`, or the guest silently falls back to llvmpipe and
-every VMM display shows black after the boot splash.
+driver.** On the live `colorburst` board this comes for free: `overlay-colorburst`
+sets no `VIDEO_CARDS` of its own and inherits `virgl` from its `reven:base`
+profile. (The retired `overlay-amd64-generic` board carried `virgl` explicitly
+in `profiles/base/make.defaults`; that overlay is no longer used.) Either way,
+if the driver is missing the guest silently falls back to llvmpipe and every VMM
+display shows black after the boot splash.

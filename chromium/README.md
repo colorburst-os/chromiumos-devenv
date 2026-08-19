@@ -18,10 +18,10 @@ The full series, in the order `apply-all.sh` applies it:
 
 | # | Patch / payload | What it does |
 |---|---|---|
-| 1–2 | `local-account-ui-0001.patch`, `-0002.patch` | the OOBE screen that creates an account with no Google account behind it ([LOCAL-ACCOUNT-UI.md](../LOCAL-ACCOUNT-UI.md)) |
-| 3 | `apply-rulebased.sh` (`rulebased-payload/` + `0001-restore-rulebased-ime-engine.patch`) | restores Chromium's rule-based IME engine, deleted upstream in M113, so Vietnamese Telex types without Google's closed decoder blob ([VIETNAMESE-IME.md](../VIETNAMESE-IME.md)) |
-| 4 | `branding-0001.patch` | Chromium → colorburst, Chromebook → computer, Google mark off the OOBE screens ([BRANDING.md §6](../BRANDING.md)) |
-| 5 | `telex-default-0001.patch` | a Vietnamese profile defaults to Telex, not TCVN ([VIETNAMESE-IME.md §7](../VIETNAMESE-IME.md)) |
+| 1–2 | `local-account-ui-0001.patch`, `-0002.patch` | the OOBE screen that creates an account with no Google account behind it (LOCAL-ACCOUNT-UI.md†) |
+| 3 | `apply-rulebased.sh` (`rulebased-payload/` + `0001-restore-rulebased-ime-engine.patch`) | restores Chromium's rule-based IME engine, deleted upstream in M113, so Vietnamese Telex types without Google's closed decoder blob (VIETNAMESE-IME.md†) |
+| 4 | `branding-0001.patch` | Chromium → colorburst, Chromebook → computer, Google mark off the OOBE screens (BRANDING.md §6†) |
+| 5 | `telex-default-0001.patch` | a Vietnamese profile defaults to Telex, not TCVN (VIETNAMESE-IME.md §7†) |
 | 6 | `telex-phase0-0001.patch` | Telex phase-0 code changes (no underline on Vietnamese composition). **Code hunks only** — see the phase-0 note below |
 | 7 | `degoogle-0001-gemini.patch` | removes every Gemini surface a local-account user can reach |
 | 8 | `degoogle-0002-mirror.patch` | disables Mirror account consistency; Google sites sign in as plain web |
@@ -33,7 +33,7 @@ The full series, in the order `apply-all.sh` applies it:
 | 14 | `branding-0002-install-colorburst.patch` | OOBE shelf: Install colorburst, not ChromeOS Flex |
 | 15 | `local-account-ui-0003-atomic-password-factor.patch` | creates the password factor with the user, openFyde-style. Applied with `patch --forward` — see below |
 | 16 | `apps-0001-gallery-viewer-and-no-mall.patch` | a real Gallery viewer; Apps & games removed |
-| 17 | `unikey-payload/` (vendored LGPL ukengine) | the UniKey Vietnamese engine core, host-proven ([VIETNAMESE-IME.md](../VIETNAMESE-IME.md)) |
+| 17 | `unikey-payload/` (vendored LGPL ukengine) | the UniKey Vietnamese engine core, host-proven (VIETNAMESE-IME.md†) |
 | 18 | `ime-unikey-0001-mojo-adapter.patch` | wires ukengine behind `mojom::InputMethod` for Vietnamese Telex |
 | 19 | `ime-routing-0000-poc-probe.patch` | PoC routing probe on the native-engine observer |
 | 20 | `ime-routing-0001-m17n-native.patch` | routes the m17n IME extension to the native mojo engine (step 0) |
@@ -42,6 +42,11 @@ The full series, in the order `apply-all.sh` applies it:
 | 23 | `ime-orca-crash-0001.patch` | fixes a browser SIGSEGV when activating a `vkd_*` IME (Orca service removed) |
 | 24 | `telex-w-toggle-0001.patch` | makes the standalone-`w` → `ư` shortcut a real toggle, default off |
 | 25 | `ime-tcvn-0001-drop-option.patch` | drops TCVN as a Vietnamese input option |
+
+† Names marked with a dagger (LOCAL-ACCOUNT-UI.md, VIETNAMESE-IME.md,
+BRANDING.md) are **internal design notes that are not shipped in this release**.
+They are referenced for provenance only; the patches themselves are the artefact
+of record and are self-contained. Do not expect those files to exist.
 
 Three patches need special handling; `apply-all.sh` does it for you, but if you
 ever apply anything by hand, know that:
@@ -82,15 +87,24 @@ installed on the host.
 ## From nothing to an image
 
 ```bash
-chromium/fetch.sh                       # ~30 GB, ~10 min
+chromium/fetch.sh                       # ~30 GB, ~10 min; verifies the tree builds
 
-cd "$CHROME/src"                        # apply our patches
-git checkout -b colorburst 831a446cd4   # the pinned base revision
-../../chromium-os/chromium-patches/apply-all.sh .   # the WHOLE series, in order
+# Apply the WHOLE patch series, in order. apply-all.sh takes the Chrome src
+# tree as an argument, so it works from anywhere -- no assumed sibling layout.
+git -C "$CHROME/src" checkout -b colorburst 831a446cd4   # the pinned base revision
+chromium-patches/apply-all.sh "$CHROME/src"
 
-cd -
+# Bootstrap the board sysroot ONCE per ChromiumOS checkout (setup_board + a
+# COMPLETE build-packages). build-image.sh does NOT do this and dies at the
+# image step without it. The first cros_sdk call here also creates the SDK
+# chroot, so the first run is slow (hours).
+chromium/bootstrap-board.sh
+
 chromium/build-image.sh                 # Chrome, BSP, image. 2-3 h cold
 ```
+
+(Run these from this repo's root; `$CHROME` defaults to `../chromium-src` — see
+`common.sh`. Only `apply-all.sh` needs the Chrome tree path.)
 
 `apply-all.sh` is the only supported way to apply the series. It replaces the old
 hand-run recipe (`git am local-account-ui-000*.patch`, then `apply-rulebased.sh`,
@@ -99,7 +113,8 @@ them out of order, left the tree dirty between steps, and double-applied the
 Telex rule tables — producing a Chrome that crash-loops at OOBE.
 
 The image lands in
-`chromiumos/src/build/images/amd64-generic/latest/chromiumos_test_image.bin`.
+`chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin`
+(also hardlinked as `colorburst-<version>.bin`).
 
 ## The fast loop
 

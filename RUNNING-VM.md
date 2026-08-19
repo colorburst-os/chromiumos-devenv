@@ -21,8 +21,11 @@ and a Wayland or X11 desktop session for the VM window.
 ## 2. Get the repo and an image
 
 ```bash
-git clone https://github.com/colorburst-os/chromiumos-devenv.git
-cd chromiumos-devenv
+# This repo (colorburst-os/chromium-os) is in the private colorburst-os org;
+# clone it over HTTPS with the gh credential helper (`gh auth setup-git`) as an
+# org member.
+git clone https://github.com/colorburst-os/chromium-os.git
+cd chromium-os
 mkdir -p chromiumos
 ```
 
@@ -45,6 +48,14 @@ Three commands. They build the container, fetch the crosvm sources
 (~30 MB, no full checkout needed), and build crosvm (ChromeOS's own
 virtual machine monitor) — about 10 minutes:
 
+`tools/fetch-crosvm-src.sh` clones the **crosvm fork**
+(`github.com/colorburst-os/crosvm`, branch `colorburst/gpu-display`) plus its
+minigbm/minijail dependencies. That fork is in the **private** `colorburst-os`
+org, so you need org membership and the `gh` credential helper
+(`gh auth setup-git`) for the clone to succeed. It also creates the
+`third_party/minijail` symlink the build needs (see the note after step 3 if you
+build crosvm from a full ChromiumOS checkout instead).
+
 ```bash
 docker build -t cros-crosvm docker/crosvm
 tools/fetch-crosvm-src.sh
@@ -59,6 +70,24 @@ env CROS_IMAGE=cros-crosvm NET=host ./cros-sdk.sh bash -c '
   cargo build --profile chromeos --features "virgl_renderer,wl-dmabuf,x" \
         --target-dir $HOME/chromiumos/.cache/crosvm-target'
 ```
+
+**Building crosvm from a FULL ChromiumOS checkout instead of
+`fetch-crosvm-src.sh`?** A full checkout ships
+`src/platform/crosvm/third_party/minijail` as an **empty stub directory**, so
+`cargo build` dies with `failed to read
+third_party/minijail/rust/minijail/Cargo.toml`. It needs a symlink to the real
+minijail checkout — but because the stub *directory* already exists, a plain
+`ln -s ../../minijail third_party/minijail` nests inside it
+(`third_party/minijail/minijail`) and does not fix the build. Remove the stub
+first, then symlink:
+
+```bash
+cd src/platform/crosvm
+rm -rf third_party/minijail
+ln -s ../../minijail third_party/minijail
+```
+
+(`fetch-crosvm-src.sh` already does this for the minimal-fetch path above.)
 
 ## 4. Run it
 
