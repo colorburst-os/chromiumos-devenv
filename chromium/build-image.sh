@@ -5,7 +5,8 @@
 #
 # NEVER run plain `cros build-packages` after building Chrome locally: it passes
 # --force-remote-binary=chromeos-base/chromeos-chrome and replaces our build
-# with the binhost's, silently. See CHROME-BUILD.md 8.
+# with the binhost's, silently. (This trap is also written up in the internal
+# CHROME-BUILD.md design note, which is not shipped in this release.)
 #
 # The BSP step is separate because the board sysroot persists between builds, so
 # an ebuild edit only reaches the image if that package is re-merged.
@@ -42,6 +43,28 @@ cros_sdk --chrome-root=/chromium -- \
   emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/update_engine
 UE_RC=\$?; echo UE_RC=\$UE_RC
 [ \$UE_RC -eq 0 ] || exit \$UE_RC
+
+# cros build-image runs \`parallel_emerge --usepkgonly virtual/target-os\`, so
+# EVERY package the image pulls in must already have a binpkg. This script only
+# built chromeos-chrome/BSP/update_engine explicitly; a fresh or partial
+# bootstrap-board.sh (e.g. one that aborted on the Chrome chain) leaves the
+# image meta-packages and everything downstream of Chrome with no binpkg, and
+# \`cros build-image\` then dies at the very end with a cryptic
+#   emerge: there are no binary packages to satisfy \"virtual/target-chromium-os\"
+# after a full run. Re-emerging just the *-dev virtual is NOT enough -- the base
+# and test virtuals are separate. Ensure the whole image virtual set here, up
+# front, so any gap fails early with a clear message instead of hours in.
+IMAGE_VIRTUALS='virtual/target-chromium-os virtual/target-chromium-os-dev virtual/target-chromium-os-test virtual/target-os virtual/target-os-dev virtual/target-os-test'
+cros_sdk --chrome-root=/chromium -- \
+  emerge-${BOARD} -v --usepkg y --getbinpkg n --with-bdeps=y \$IMAGE_VIRTUALS
+VIRT_RC=\$?; echo VIRT_RC=\$VIRT_RC
+if [ \$VIRT_RC -ne 0 ]; then
+  echo 'FATAL: could not build the image virtual package set.' >&2
+  echo '       cros build-image would fail at the very end with a cryptic' >&2
+  echo '       \"no binary packages to satisfy virtual/target-*\". Run' >&2
+  echo '       chromium/bootstrap-board.sh (a COMPLETE build-packages) first.' >&2
+  exit \$VIRT_RC
+fi
 
 cros_sdk --chrome-root=/chromium -- env \
   CHROMEOS_VERSION_DEVSERVER='https://devserver.colorburst.net' \

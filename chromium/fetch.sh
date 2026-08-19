@@ -37,5 +37,29 @@ if [ ! -d src/.git ]; then
 fi
 cd /chromium
 gclient sync --nohooks --no-history --delete_unversioned_trees -j8
-gclient runhooks
+
+# Plain \`gclient runhooks\` is a state-cached no-op here: it tracks which hooks
+# already ran and silently skips them, producing NO output and leaving the
+# generated files below absent. Only --force actually re-runs every hook and
+# regenerates tast_control.gni, LASTCHANGE, etc. Without it fetch.sh exits 0
+# on a tree that cannot build Chrome, and the failure only surfaces hours
+# later inside a package build. So force the hooks, then VERIFY.
+gclient runhooks --force
+
+# Assert the build inputs a bare gclient sync/runhooks is supposed to create
+# actually exist. Each of these was, in a real run, silently missing after a
+# clean exit-0 fetch and blocked the Chrome build:
+#   * buildtools/linux64/gn         -- CIPD-fetched; chrome-icu configure needs it
+#   * chromeos/tast_control.gni     -- runhook tast_control.py; chromeos/BUILD.gn
+#   * build/util/LASTCHANGE         -- runhook lastchange.py; build/timestamp.gni
+missing=
+for f in src/buildtools/linux64/gn src/chromeos/tast_control.gni src/build/util/LASTCHANGE; do
+  [ -e \"/chromium/\$f\" ] || missing=\"\$missing \$f\"
+done
+if [ -n \"\$missing\" ]; then
+  echo \"FATAL: fetch produced a tree missing build inputs:\$missing\" >&2
+  echo \"       (gclient runhooks --force did not create them; the tree is NOT buildable)\" >&2
+  exit 1
+fi
+echo 'fetch.sh: Chrome tree verified buildable (gn + tast_control.gni + LASTCHANGE present)'
 "
