@@ -1,0 +1,58 @@
+From ade6924b4629255cb9de70f012fb60486a0e930a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Tue, 18 Aug 2026 15:58:07 -0700
+Subject: [PATCH] Guest ToS: the usage-data toggle names colorburst, not Google
+
+The browse-as-guest terms screen's usage/diagnostics opt-in read "...sending
+crash reports as well as diagnostic and usage data to Google." On a de-Googled
+product that is the wrong name on the one data toggle a guest sees, so it now
+reads colorburst, in both the English source and the Vietnamese translation
+(the source edit refingerprints the xtb id, so the vi entry is re-keyed).
+
+Recorded honestly for whoever revisits this: on our build the toggle is
+currently aspirational. It drives the standard UMA consent
+(kOobeGuestMetricsEnabled), but IDS_METRICS_SERVER_URL is the empty-string
+placeholder "-" (the real endpoint lives in Google's internal repo we do not
+have), so GetMetricsServerUrl() returns an empty GURL and nothing is uploaded
+anywhere -- not to Google, not yet to colorburst. Naming the toggle colorburst
+is a deliberate product choice; making it literally true means standing up a
+metrics receiver and pointing IDS_METRICS_SERVER_URL at it, the way the OTA
+server was built.
+
+
+
+---
+ ash/login/resources/ash_login_strings.grd                 | 2 +-
+ ash/login/resources/translations/ash_login_strings_vi.xtb | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ash/login/resources/ash_login_strings.grd b/ash/login/resources/ash_login_strings.grd
+index 9e9623722d..891037b68d 100644
+--- a/ash/login/resources/ash_login_strings.grd
++++ b/ash/login/resources/ash_login_strings.grd
+@@ -1713,7 +1713,7 @@
+         Send diagnostic and usage data.
+       </message>
+       <message name="IDS_GUEST_TOS_USAGE_OPT_IN" desc="Message in the guest terms of service screen to opt-in for metrics during the guest session.">
+-        Help improve Chrome and ChromeOS features and performance by automatically sending crash reports as well as diagnostic and usage data to Google.
++        Help improve colorburst features and performance by automatically sending crash reports as well as diagnostic and usage data to colorburst.
+       </message>
+       <message name="IDS_GUEST_TOS_USAGE_OPT_IN_LEARN_MORE_LINK" desc="Learn more link text in guest terms of service screen.">
+         Learn more about diagnostic and usage data
+diff --git a/ash/login/resources/translations/ash_login_strings_vi.xtb b/ash/login/resources/translations/ash_login_strings_vi.xtb
+index 1c6eb2e126..f587a241ce 100644
+--- a/ash/login/resources/translations/ash_login_strings_vi.xtb
++++ b/ash/login/resources/translations/ash_login_strings_vi.xtb
+@@ -676,7 +676,7 @@
+ <translation id="8131740175452115882">Xác nhận</translation>
+ <translation id="8146177459103116374">Nếu bạn đã đăng ký trên thiết bị này, bạn có thể <ph name="LINK2_START" />đăng nhập với tư cách là người dùng hiện tại<ph name="LINK2_END" />.</translation>
+ <translation id="8146793085009540321">Đăng nhập không thành công. Vui lòng liên hệ với quản trị viên của bạn hoặc thử lại.</translation>
+-<translation id="8147346945017130012">Giúp cải thiện hiệu suất và các tính năng của Chrome và Chrome OS bằng cách tự động gửi các báo cáo sự cố cũng như dữ liệu sử dụng và thông tin chẩn đoán cho Google.</translation>
++<translation id="3914421935132424778">Giúp cải thiện hiệu suất và các tính năng của colorburst bằng cách tự động gửi các báo cáo sự cố cũng như dữ liệu sử dụng và thông tin chẩn đoán cho colorburst.</translation>
+ <translation id="8152760814912191567">Google Beam cho Zoom</translation>
+ <translation id="815491593104042026">Rất tiếc! Xác thực không thành công do được định cấu hình sử dụng URL không an toàn (<ph name="BLOCKED_URL" />). Hãy liên hệ với quản trị viên của bạn.</translation>
+ <translation id="8157704005178149728">Đang thiết lập tính năng giám sát</translation>
+-- 
+2.53.0
+

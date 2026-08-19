@@ -30,11 +30,6 @@ composition draws with no underline.
 
 
 ---
- .../ash/input_method/input_method_engine.cc   | 55 +++++++++++++++++++
- .../ime/public/cpp/rulebased/def/vi_telex.cc  | 33 +++++++++++
- .../ime/public/cpp/rulebased/def/vi_vni.cc    | 20 ++++++-
- .../ash/services/ime/rule_based_engine.cc     |  7 ++-
- 4 files changed, 113 insertions(+), 2 deletions(-)
 
 diff --git a/chrome/browser/ash/input_method/input_method_engine.cc b/chrome/browser/ash/input_method/input_method_engine.cc
 index 0a09d8bb24..8da0d6fdbb 100644
@@ -128,95 +123,6 @@ index 0a09d8bb24..8da0d6fdbb 100644
      text_span.start_offset = segment.start;
      text_span.end_offset = segment.end;
      text_spans.push_back(text_span);
-diff --git a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
-index bc7ad3c566..8da02fb815 100644
---- a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
-+++ b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_telex.cc
-@@ -11,6 +11,25 @@ namespace vi_telex {
- const char* kId = "vi_telex";
- bool kIs102 = false;
- const char* kTransforms[] = {
-+    // NOTE(colorburst fork): five rules upstream's table never had. See
-+    // VIETNAMESE-ENGINE.md 1.5 for the measurements behind each.
-+    //
-+    // "uo" + w puts the horn on BOTH vowels, which is what a Telex typist
-+    // means: nguowfi -> nguoi with two horns -> "nguoi". Without this the
-+    // typist has to type the second w explicitly (nguwowfi).
-+    "[uU]\u001d?[oO]\u001d?[wW]",
-+    "\u01b0\u01a1",
-+    "[uU]\u001d?[oO]\u001d?[nN]\u001d?[gG]\u001d?[wW]",
-+    "\u01b0\u01a1ng",
-+    // Double-typing a modifier escapes it. That already worked for dd/aa/ee/oo
-+    // and for the tone keys, but not for the w family: uww gave "uu-horn"
-+    // instead of the literal "uw" the typist asked for.
-+    "\u01b0\u001d[wW]",
-+    "uw",
-+    "\u0103\u001d[wW]",
-+    "aw",
-+    "\u01a1\u001d[wW]",
-+    "ow",
-     "d\u001d?d",
-     "\u0111",
-     "a\u001d?a",
-@@ -106,6 +125,20 @@ const char* kTransforms[] = {
-     "\\2\\3",
-     "(\u0323)([a-zA-Z\u001d]*)([jJ])",
-     "\\2\\3",
-+    // Retyping a different tone REPLACES the one already there, rather than
-+    // stacking a second diacritic on the syllable: hoafs was "hoa" with both
-+    // grave and acute, and is now "hoa" with acute. Each rule matches the four
-+    // tones that are not the one being typed.
-+    "^(.*)([\u0301\u0309\u0303\u0323])([a-zA-Z\u001d]*)([fF])",
-+    "\\1\u0300\\3",
-+    "^(.*)([\u0300\u0309\u0303\u0323])([a-zA-Z\u001d]*)([sS])",
-+    "\\1\u0301\\3",
-+    "^(.*)([\u0300\u0301\u0303\u0323])([a-zA-Z\u001d]*)([rR])",
-+    "\\1\u0309\\3",
-+    "^(.*)([\u0300\u0301\u0309\u0323])([a-zA-Z\u001d]*)([xX])",
-+    "\\1\u0303\\3",
-+    "^(.*)([\u0300\u0301\u0309\u0303])([a-zA-Z\u001d]*)([jJ])",
-+    "\\1\u0323\\3",
-     "(([qQ][uU]|[gG][iI])?[aeiouyAEIOUY]+)([\u0300\u0301\u0303\u0309\u0323])"
-     "\u001d?([aeiouyAEIOUY])\u001d?([a-eg-ik-qtuvyA-EG-IK-QTUVY])",
-     "\\1\\4\\3\\5",
-diff --git a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc
-index 262b206f4e..917b1c79b4 100644
---- a/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc
-+++ b/chromeos/ash/services/ime/public/cpp/rulebased/def/vi_vni.cc
-@@ -23,6 +23,11 @@ const char* kTransforms[] = {
-     "\\1\u00f4",
-     "(\\w*)a\u001d?8",
-     "\\1\u0103",
-+    // NOTE(colorburst fork): the VNI analogues of the Telex additions in
-+    // vi_telex.cc. uo + 7 horns both vowels, so nguo7i2 gives what a
-+    // Vietnamese typist means rather than a horn on the o alone.
-+    "(\\w*)[uU]\u001d?[oO]\u001d?7",
-+    "\\1\u01b0\u01a1",
-     "(\\w*)o\u001d?7",
-     "\\1\u01a1",
-     "(\\w*)u\u001d?7",
-@@ -80,7 +85,20 @@ const char* kTransforms[] = {
-     "([\u0300\u0301\u0303\u0309\u0323])(["
-     "\u0103\u00e2\u00ea\u00f4\u01a1\u01b0\u0102\u00c2\u00ca\u00d4\u01a0\u01af"
-     "])\u001d?([a-zA-Z])",
--    "\\2\\1\\3"};
-+    "\\2\\1\\3",
-+    // NOTE(colorburst fork): retyping a tone digit replaces the tone already on
-+    // the syllable instead of stacking a second diacritic. Same five rules as
-+    // Telex; see VIETNAMESE-ENGINE.md 1.5.
-+    "^(.*)([\u0301\u0309\u0303\u0323])([a-zA-Z\u001d]*)(2)",
-+    "\\1\u0300\\3",
-+    "^(.*)([\u0300\u0309\u0303\u0323])([a-zA-Z\u001d]*)(1)",
-+    "\\1\u0301\\3",
-+    "^(.*)([\u0300\u0301\u0303\u0323])([a-zA-Z\u001d]*)(3)",
-+    "\\1\u0309\\3",
-+    "^(.*)([\u0300\u0301\u0309\u0323])([a-zA-Z\u001d]*)(4)",
-+    "\\1\u0303\\3",
-+    "^(.*)([\u0300\u0301\u0309\u0303])([a-zA-Z\u001d]*)(5)",
-+    "\\1\u0323\\3"};
- const unsigned int kTransformsLen = std::size(kTransforms);
- const char* kHistoryPrune = nullptr;
- 
 diff --git a/chromeos/ash/services/ime/rule_based_engine.cc b/chromeos/ash/services/ime/rule_based_engine.cc
 index 955e9bfdc3..05b25ea954 100644
 --- a/chromeos/ash/services/ime/rule_based_engine.cc
@@ -236,6 +142,3 @@ index 955e9bfdc3..05b25ea954 100644
      const int new_cursor_position = text.length();
      host->SetComposition(std::move(text), std::move(spans),
                           new_cursor_position);
--- 
-2.53.0
-
