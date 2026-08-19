@@ -1,0 +1,38 @@
+# Telex regression battery for the colorburst UniKey IME port.
+# One test per line:  <telex-input>  <tag>
+# tag is informational (D1 = word-level tone placement, D4 = non-Vietnamese
+# restore, vn = ordinary Vietnamese, en = English that must survive). The
+# on-device engine output is diffed against the bamboo-core oracle; D4/en lines
+# are expected to diverge from a naive oracle run and are classified in the report.
+tieengs        vn
+vieejt         vn
+nguwowfi       vn
+nguyeenx       vn
+khuyru         vn
+chuaanr        vn
+hoocj          vn
+laf            vn
+mootj          vn
+nieemf         vn
+vui            vn
+nghieengs      vn
+ddaay          vn
+tie61ng        skip
+giaamf         vn
+huowng         vn
+suongws        vn
+truowngf       vn
+# D1: word-level tone placement (classic vs modern differ on these)
+hoaf           D1
+hoas           D1
+khoej          D1
+thuya          D1
+# D4: English / non-Vietnamese that must not be mangled
+congas         D4
+windows        D4
+wifi           D4
+work           D4
+first          D4
+know           D4
+video          D4
+menu           D4
