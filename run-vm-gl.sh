@@ -4,15 +4,15 @@
 #   ./run-vm-gl.sh [path-to-image.bin]
 #
 # Guest Chrome renders via virgl on the host GPU (needs an image built with
-# VIDEO_CARDS including "virgl" — see overlay-amd64-generic make.defaults;
-# without the guest virgl Mesa driver every display backend shows black
-# after the splash). Close the window or Ctrl-C to stop the VM.
+# the virgl Mesa driver; the colorburst board inherits it from reven:base.
+# Without it every display backend shows black after the splash). Close the
+# window or Ctrl-C to stop the VM.
 # SSH: ssh -p 9222 root@localhost (password: test0000).
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-HOST_IMG="${1:-$DIR/chromiumos/src/build/images/amd64-generic/latest/chromiumos_test_image.bin}"
+HOST_IMG="${1:-$DIR/chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin}"
 if [ ! -f "$HOST_IMG" ]; then
     echo "error: image not found: $HOST_IMG" >&2
     exit 1

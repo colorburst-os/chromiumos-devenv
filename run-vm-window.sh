@@ -3,8 +3,9 @@
 #
 #   ./run-vm-window.sh [path-to-image.bin]
 #
-# Defaults to the latest amd64-generic test image. Close the window or Ctrl-C
-# to stop the VM. SSH: ssh -p 9222 root@localhost (password: test0000).
+# Defaults to the latest colorburst test image (the live board; amd64-generic
+# is retired). Close the window or Ctrl-C to stop the VM.
+# SSH: ssh -p 9222 root@localhost (password: test0000).
 #
 # Display is plain virtio-vga (2D): the guest composites the UI in software,
 # which renders correctly and is plenty fast for UI work. Do NOT switch to
@@ -16,7 +17,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-HOST_IMG="${1:-$DIR/chromiumos/src/build/images/amd64-generic/latest/chromiumos_test_image.bin}"
+HOST_IMG="${1:-$DIR/chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin}"
 if [ ! -f "$HOST_IMG" ]; then
     echo "error: image not found: $HOST_IMG" >&2
     exit 1

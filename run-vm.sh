@@ -3,8 +3,9 @@
 #
 #   ./run-vm.sh [path-to-image.bin]
 #
-# Defaults to the latest amd64-generic test image. Connect a viewer to
-# localhost:5900 (e.g. `remmina -c vnc://localhost:5900`), or SSH in with
+# Defaults to the latest colorburst test image (the live board; amd64-generic
+# is retired). Connect a viewer to localhost:5900 (e.g.
+# `remmina -c vnc://localhost:5900`), or SSH in with
 # `ssh -p 9222 root@localhost` (password: test0000).
 #
 # The VM lives inside the container: keep this script running, and Ctrl-C /
@@ -12,7 +13,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BOARD=amd64-generic
+BOARD="${CROS_VM_BOARD:-colorburst}"
 
 # Translate a host image path to the container's /mnt/host/source view.
 HOST_IMG="${1:-$DIR/chromiumos/src/build/images/$BOARD/latest/chromiumos_test_image.bin}"

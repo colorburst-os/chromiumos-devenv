@@ -42,8 +42,9 @@ esac
 # Resolve the image through the `latest` symlink: instances record the base
 # path inside their overlay, and a later build-image moves that symlink.
 # Image precedence: explicit argument, then CROS_VM_IMAGE (how vm-instance.sh
-# callers pick a board), then the amd64-generic default.
-HOST_IMG="$(readlink -f "${1:-${CROS_VM_IMAGE:-$DIR/chromiumos/src/build/images/amd64-generic/latest/chromiumos_test_image.bin}}")"
+# callers pick a board), then the colorburst default (the live board;
+# amd64-generic is retired).
+HOST_IMG="$(readlink -f "${1:-${CROS_VM_IMAGE:-$DIR/chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin}}")"
 if [ ! -f "$HOST_IMG" ]; then
     echo "error: image not found: $HOST_IMG" >&2
     exit 1
@@ -109,13 +110,16 @@ CPUS="${CROS_VM_CPUS:-8}"
 DISK2_ARG=""
 ROOTDEV="/dev/vda3"
 
-# CROS_VM_SCSI=1 presents the disk over virtio-scsi instead of virtio-blk.
+# CROS_VM_SCSI presents the disk over virtio-scsi instead of virtio-blk.
 # The reven-based kernel (6.12, colorburst board) builds virtio_blk as a
 # module but virtio-scsi in (CONFIG_SCSI_VIRTIO=y), and we boot noinitrd, so
 # on that image a --block root disk hangs at "Waiting for root device
 # /dev/vda3". SCSI disks appear as /dev/sda instead of /dev/vda.
+#
+# It therefore defaults to ON: the live board is colorburst, which REQUIRES it.
+# Set CROS_VM_SCSI=0 explicitly to boot an old amd64-generic (virtio_blk) image.
 BLOCK_FLAG="--block"
-if [ "${CROS_VM_SCSI:-0}" = 1 ]; then
+if [ "${CROS_VM_SCSI:-1}" = 1 ]; then
     BLOCK_FLAG="--scsi-block"
     ROOTDEV="/dev/sda3"
 fi
@@ -141,7 +145,7 @@ if [ -n "${CROS_VM_DISK2:-}" ]; then
     # kernel virtio_blk is a module (see CROS_VM_SCSI above), so a --block
     # second disk could never be the boot root, and mixing transports just
     # confuses device naming. SCSI: sda/sdb; blk: vda/vdb.
-    D2_DEV="/dev/vdb" && [ "${CROS_VM_SCSI:-0}" = 1 ] && D2_DEV="/dev/sdb"
+    D2_DEV="/dev/vdb" && [ "${CROS_VM_SCSI:-1}" = 1 ] && D2_DEV="/dev/sdb"
     DISK2_ARG="$BLOCK_FLAG path=/home/cros/chromiumos/$D2_REL,ro=false"
     echo ">>> second disk: $D2_HOST -> guest $D2_DEV"
     # CROS_VM_ROOT_PART picks the rootfs partition on the boot disk
