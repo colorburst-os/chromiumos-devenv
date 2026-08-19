@@ -1,0 +1,216 @@
+diff -urN a/chrome/browser/ash/input_method/native_input_method_engine_observer.cc b/chrome/browser/ash/input_method/native_input_method_engine_observer.cc
+--- a/chrome/browser/ash/input_method/native_input_method_engine_observer.cc	2026-08-14 22:03:31.841967538 -0700
++++ b/chrome/browser/ash/input_method/native_input_method_engine_observer.cc	2026-08-14 22:04:54.538505403 -0700
+@@ -64,10 +64,6 @@
+   bool multiword_allowed = false;
+ };
+ 
+-bool ShouldRouteToFirstPartyVietnameseInput(std::string_view engine_id) {
+-  return engine_id == "vkd_vi_vni" || engine_id == "vkd_vi_telex";
+-}
+-
+ bool IsRuleBasedEngine(std::string_view engine_id) {
+   return base::StartsWith(engine_id, "vkd_", base::CompareCase::SENSITIVE);
+ }
+@@ -824,13 +820,7 @@
+     return;
+   }
+ 
+-  if (ShouldRouteToFirstPartyVietnameseInput(engine_id)) {
+-    // TODO(b/251679480): Make this part of ShouldRouteToNativeMojoEngine
+-    // logic once flag is baked in.
+-    ConnectToImeService(engine_id);
+-    // Notify the virtual keyboard extension that the IME has changed.
+-    ime_base_observer_->OnActivate(engine_id);
+-  } else if (ShouldRouteToRuleBasedEngine(engine_id)) {
++  if (ShouldRouteToRuleBasedEngine(engine_id)) {
+     const auto new_engine_id = NormalizeRuleBasedEngineId(engine_id);
+     ConnectToImeService(new_engine_id);
+     // Notify the virtual keyboard extension that the IME has changed.
+diff -urN a/chromeos/ash/services/ime/BUILD.gn b/chromeos/ash/services/ime/BUILD.gn
+--- a/chromeos/ash/services/ime/BUILD.gn	2026-08-14 22:03:31.834105079 -0700
++++ b/chromeos/ash/services/ime/BUILD.gn	2026-08-14 22:04:44.212852042 -0700
+@@ -37,6 +37,10 @@
+     "decoder/decoder_engine.h",
+     "decoder/system_engine.cc",
+     "decoder/system_engine.h",
++    "rule_based_engine.cc",
++    "rule_based_engine.h",
++    "rule_based_engine_connection_factory.cc",
++    "rule_based_engine_connection_factory.h",
+     "ime_service.cc",
+     "ime_service.h",
+     "input_method_user_data_service_impl.cc",
+@@ -53,6 +57,8 @@
+     ":ime_shared_library",
+     "//ash/constants",
+     "//base",
++    "//chromeos/ash/services/ime/public/cpp:rulebased",
++    "//chromeos/ash/services/ime/public/cpp:structs",
+     "//chromeos/ash/services/ime/public/cpp/shared_lib:interfaces",
+     "//chromeos/ash/services/ime/public/cpp/shared_lib/proto",
+     "//chromeos/ash/services/ime/public/mojom",
+diff -urN a/chromeos/ash/services/ime/ime_service.cc b/chromeos/ash/services/ime/ime_service.cc
+--- a/chromeos/ash/services/ime/ime_service.cc	2026-08-14 22:03:31.826294377 -0700
++++ b/chromeos/ash/services/ime/ime_service.cc	2026-08-14 22:04:44.212902667 -0700
+@@ -76,6 +76,7 @@
+ void ImeService::ResetAllBackendConnections() {
+   proto_mode_shared_lib_engine_.reset();
+   mojo_mode_shared_lib_engine_.reset();
++  rule_based_connection_factory_.reset();
+ }
+ 
+ void ImeService::BindInputMethodUserDataService(
+@@ -109,8 +110,10 @@
+   //
+   // The extension will only use ConnectToImeEngine, and NativeInputMethodEngine
+   // will only use ConnectToInputMethod.
+-  if (mojo_mode_shared_lib_engine_ &&
+-      mojo_mode_shared_lib_engine_->IsConnected()) {
++  if ((mojo_mode_shared_lib_engine_ &&
++       mojo_mode_shared_lib_engine_->IsConnected()) ||
++      (rule_based_connection_factory_ &&
++       rule_based_connection_factory_->IsConnected())) {
+     std::move(callback).Run(/*bound=*/false);
+     return;
+   }
+@@ -129,8 +132,22 @@
+     InitializeConnectionFactoryCallback callback) {
+   ResetAllBackendConnections();
+ 
+-  mojo_mode_shared_lib_engine_ = std::make_unique<SystemEngine>(
+-      this, ime_shared_library_->MaybeLoadThenReturnEntryPoints());
++  std::optional<ImeSharedLibraryWrapper::EntryPoints> entry_points =
++      ime_shared_library_->MaybeLoadThenReturnEntryPoints();
++
++  // When the 1P IME shared library is unavailable (any build that does not
++  // ship /usr/lib64/libimedecoder.so), serve the rule-based input methods
++  // in-process from the open-source rulebased engine instead of failing.
++  if (!entry_points) {
++    rule_based_connection_factory_ =
++        std::make_unique<RuleBasedEngineConnectionFactory>(
++            std::move(connection_factory));
++    std::move(callback).Run(/*success=*/true);
++    return;
++  }
++
++  mojo_mode_shared_lib_engine_ =
++      std::make_unique<SystemEngine>(this, entry_points);
+   bool bound = mojo_mode_shared_lib_engine_->BindConnectionFactory(
+       std::move(connection_factory));
+   std::move(callback).Run(bound);
+diff -urN a/chromeos/ash/services/ime/ime_service.h b/chromeos/ash/services/ime/ime_service.h
+--- a/chromeos/ash/services/ime/ime_service.h	2026-08-14 22:03:31.830138212 -0700
++++ b/chromeos/ash/services/ime/ime_service.h	2026-08-14 22:04:44.212875326 -0700
+@@ -21,6 +21,7 @@
+ #include "chromeos/ash/services/ime/public/cpp/shared_lib/interfaces.h"
+ #include "chromeos/ash/services/ime/public/mojom/ime_service.mojom.h"
+ #include "chromeos/ash/services/ime/public/mojom/input_method_user_data.mojom.h"
++#include "chromeos/ash/services/ime/rule_based_engine_connection_factory.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ #include "mojo/public/cpp/bindings/pending_remote.h"
+ #include "mojo/public/cpp/bindings/receiver.h"
+@@ -124,6 +125,13 @@
+   std::unique_ptr<DecoderEngine> proto_mode_shared_lib_engine_;
+   std::unique_ptr<SystemEngine> mojo_mode_shared_lib_engine_;
+ 
++  // In-process, open-source implementation of ConnectionFactory serving the
++  // rule-based ("m17n:*", i.e. "vkd_*") input methods. Used when the 1P IME
++  // shared library is not present on the image, which is the case for any
++  // non-Google-branded ChromeOS build.
++  std::unique_ptr<RuleBasedEngineConnectionFactory>
++      rule_based_connection_factory_;
++
+   // InputMethodUserDataService runs independently of the DecoderEngine and
+   // SystemEngine, and is always connected after binding.
+   std::unique_ptr<InputMethodUserDataServiceImpl> input_method_user_data_api_;
+diff -urN a/chromeos/ash/services/ime/public/cpp/BUILD.gn b/chromeos/ash/services/ime/public/cpp/BUILD.gn
+--- a/chromeos/ash/services/ime/public/cpp/BUILD.gn	2026-08-14 22:03:31.838147387 -0700
++++ b/chromeos/ash/services/ime/public/cpp/BUILD.gn	2026-08-14 22:04:44.212718391 -0700
+@@ -11,3 +11,86 @@
+     "autocorrect.h",
+   ]
+ }
++
++source_set("rulebased") {
++  sources = [
++    "rulebased/def/ar.cc",
++    "rulebased/def/ar.h",
++    "rulebased/def/bn_phone.cc",
++    "rulebased/def/bn_phone.h",
++    "rulebased/def/ckb_ar.cc",
++    "rulebased/def/ckb_ar.h",
++    "rulebased/def/ckb_en.cc",
++    "rulebased/def/ckb_en.h",
++    "rulebased/def/deva_phone.cc",
++    "rulebased/def/deva_phone.h",
++    "rulebased/def/ethi.cc",
++    "rulebased/def/ethi.h",
++    "rulebased/def/fa.cc",
++    "rulebased/def/fa.h",
++    "rulebased/def/gu_phone.cc",
++    "rulebased/def/gu_phone.h",
++    "rulebased/def/hi_inscript.cc",
++    "rulebased/def/hi_inscript.h",
++    "rulebased/def/km.cc",
++    "rulebased/def/km.h",
++    "rulebased/def/kn_phone.cc",
++    "rulebased/def/kn_phone.h",
++    "rulebased/def/lo.cc",
++    "rulebased/def/lo.h",
++    "rulebased/def/ml_phone.cc",
++    "rulebased/def/ml_phone.h",
++    "rulebased/def/my.cc",
++    "rulebased/def/my.h",
++    "rulebased/def/my_myansan.cc",
++    "rulebased/def/my_myansan.h",
++    "rulebased/def/ne_inscript.cc",
++    "rulebased/def/ne_inscript.h",
++    "rulebased/def/ne_phone.cc",
++    "rulebased/def/ne_phone.h",
++    "rulebased/def/ru_phone_aatseel.cc",
++    "rulebased/def/ru_phone_aatseel.h",
++    "rulebased/def/ru_phone_yazhert.cc",
++    "rulebased/def/ru_phone_yazhert.h",
++    "rulebased/def/si.cc",
++    "rulebased/def/si.h",
++    "rulebased/def/ta_inscript.cc",
++    "rulebased/def/ta_inscript.h",
++    "rulebased/def/ta_itrans.cc",
++    "rulebased/def/ta_itrans.h",
++    "rulebased/def/ta_phone.cc",
++    "rulebased/def/ta_phone.h",
++    "rulebased/def/ta_tamil99.cc",
++    "rulebased/def/ta_tamil99.h",
++    "rulebased/def/ta_typewriter.cc",
++    "rulebased/def/ta_typewriter.h",
++    "rulebased/def/te_phone.cc",
++    "rulebased/def/te_phone.h",
++    "rulebased/def/th.cc",
++    "rulebased/def/th.h",
++    "rulebased/def/th_pattajoti.cc",
++    "rulebased/def/th_pattajoti.h",
++    "rulebased/def/th_tis.cc",
++    "rulebased/def/th_tis.h",
++    "rulebased/def/us.cc",
++    "rulebased/def/us.h",
++    "rulebased/def/vi_tcvn.cc",
++    "rulebased/def/vi_tcvn.h",
++    "rulebased/def/vi_telex.cc",
++    "rulebased/def/vi_telex.h",
++    "rulebased/def/vi_viqr.cc",
++    "rulebased/def/vi_viqr.h",
++    "rulebased/def/vi_vni.cc",
++    "rulebased/def/vi_vni.h",
++    "rulebased/engine.cc",
++    "rulebased/engine.h",
++    "rulebased/rules_data.cc",
++    "rulebased/rules_data.h",
++  ]
++
++  deps = [
++    "//base",
++    "//chromeos/ash/services/ime/public/mojom:mojom",
++    "//third_party/re2",
++  ]
++}
