@@ -1,0 +1,60 @@
+From 6c46e17cb33b38502f2447ecc833a0667a641aee Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Mon, 17 Aug 2026 14:41:59 -0700
+Subject: [PATCH] OOBE shelf: Install colorburst, not ChromeOS Flex
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The login-shelf / OOBE bottom-bar install affordance
+(IDS_ASH_SHELF_OS_INSTALL_BUTTON, shown when --allow-os-install) still
+said "Install ChromeOS Flex". The os-install screens themselves already
+say colorburst via IDS_INSTALLED_PRODUCT_OS_NAME; this was the one
+straggler. English text changes in chromeos_strings.grd, and the
+Vietnamese translation moves to the new grit id (fingerprint computed
+with the in-tree grit, same as the earlier local-account vi strings):
+1852934301711881861 -> 745994199152920882, "Cài đặt colorburst".
+Other locales fall back to the English string rather than showing the
+stale Flex name.
+
+
+
+---
+ chromeos/chromeos_strings.grd            | 6 ++++--
+ chromeos/strings/chromeos_strings_vi.xtb | 2 +-
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/chromeos/chromeos_strings.grd b/chromeos/chromeos_strings.grd
+index 107d55a25e..1f25d44147 100644
+--- a/chromeos/chromeos_strings.grd
++++ b/chromeos/chromeos_strings.grd
+@@ -684,8 +684,10 @@
+         <message name="IDS_ASH_SHELF_SIGNIN_BUTTON" desc="Text shown on sign in button on enrollment screen.">
+           Use as a personal device
+         </message>
+-        <message name="IDS_ASH_SHELF_OS_INSTALL_BUTTON" desc="Text shown on install ChromeOS Flex button on login screen.">
+-          Install ChromeOS Flex
++        <!-- NOTE(colorburst fork): the OOBE / login-shelf install affordance
++             names colorburst, not ChromeOS Flex. -->
++        <message name="IDS_ASH_SHELF_OS_INSTALL_BUTTON" desc="Text shown on the install-colorburst button on the login screen.">
++          Install colorburst
+         </message>
+         <message name="IDS_ASH_SHELF_APP_LIST_LAUNCHER_TITLE" desc="The title used for the Ash Launcher in the Shelf (not mentioning 'Apps' since this is a general launcher).">
+           Launcher
+diff --git a/chromeos/strings/chromeos_strings_vi.xtb b/chromeos/strings/chromeos_strings_vi.xtb
+index ba80374b84..84b9b6d53f 100644
+--- a/chromeos/strings/chromeos_strings_vi.xtb
++++ b/chromeos/strings/chromeos_strings_vi.xtb
+@@ -233,7 +233,7 @@
+ <translation id="184095011128924488">sáng tạo</translation>
+ <translation id="1846318329111865304">Cảnh trong mơ</translation>
+ <translation id="1851218745569890714">Hội nghị truyền hình</translation>
+-<translation id="1852934301711881861">Cài đặt ChromeOS Flex</translation>
++<translation id="745994199152920882">Cài đặt colorburst</translation>
+ <translation id="1854156910036166007">con lười</translation>
+ <translation id="1856388568474281774">Mũi tên xuống</translation>
+ <translation id="1858620243986915808">Đính kèm ảnh chụp màn hình</translation>
+-- 
+2.53.0
+

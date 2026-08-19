@@ -1,0 +1,798 @@
+From ea78fbbcf63b432e8374f03f7d87da5d983719dc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sat, 15 Aug 2026 07:20:21 -0700
+Subject: [PATCH] Rebrand the visible product and device names
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Chromium -> colorburst, and the device is a "computer" rather than a
+Chromebook or a "Chrome device". Both flow through placeholders that every
+screen already substitutes, so one edit per name covers OOBE, the login
+screen and Settings in all 248 locales without touching a translation:
+
+  IDS_PRODUCT_NAME / IDS_SHORT_PRODUCT_NAME              -> colorburst
+  IDS_{,SHORT_,INSTALLED_}PRODUCT_OS_NAME                -> colorburst
+  IDS_*_DEVICE_NAME{,_IN_PLURAL}                         -> computer(s)
+  IDS_ASH_MESSAGE_CENTER_SYSTEM_APP_NAME                 -> colorburst
+
+The product names were translated as themselves, so dropping their old
+translation ids is right: a brand should not be localised. The device names
+were not, so ui_chromeos_strings_vi.xtb gains the two entries that keep the
+Vietnamese UI Vietnamese ("máy tính"), keyed by the grit fingerprint of the
+new English source.
+
+The Google "G" that headed 28 OOBE screens is replaced by a colorburst mark
+-- the reference bars a colour television locks its phase to. One icon
+definition, and the screens pick it up by name.
+
+Our own local-account strings no longer mention Google at all: the card reads
+"Create a local account / An account that stays on this computer. No internet
+connection needed."
+
+Verified on a booted image: welcome, install-or-try and account screens all
+read colorburst / máy tính, with the bars in place of the G.
+
+
+
+---
+ ash/ash_strings.grd                           |  2 +-
+ ash/login/resources/ash_login_strings.grd     |  8 +++----
+ chrome/app/chromium_strings.grd               | 10 ++++----
+ .../chromeos/login/components/oobe_icons.html | 10 ++++++++
+ .../screens/common/consolidated_consent.html  | 12 +++++-----
+ .../login/screens/common/gaia_info.html       |  2 +-
+ .../login/screens/common/gaia_signin.html     |  2 +-
+ .../login/screens/common/guest_tos.html       |  6 ++---
+ .../screens/common/hw_data_collection.html    |  2 +-
+ .../common/online_authentication_screen.html  |  2 +-
+ .../login/screens/common/os_install.html      |  6 ++---
+ .../login/screens/common/os_trial.html        |  2 +-
+ .../screens/common/parental_handoff.html      |  2 +-
+ .../login/screens/common/perks_discovery.html |  2 +-
+ .../login/screens/common/quick_start.html     |  6 ++---
+ .../login/screens/common/recommend_apps.html  |  2 +-
+ .../screens/common/saml_confirm_password.html |  2 +-
+ .../login/screens/common/sync_consent.html    |  2 +-
+ .../login/screens/common/user_creation.html   |  4 ++--
+ .../login/checking_downloading_update.html    |  6 ++---
+ .../screens/login/encryption_migration.html   |  2 +-
+ .../screens/oobe/auto_enrollment_check.html   |  2 +-
+ .../login/screens/oobe/consumer_update.html   |  8 +++----
+ .../login/screens/oobe/fjord_fw_update.html   |  2 +-
+ .../screens/oobe/fjord_image_download.html    |  2 +-
+ .../screens/oobe/fjord_image_selection.html   |  2 +-
+ .../chromeos/login/screens/oobe/update.html   | 14 +++++------
+ .../screens/osauth/cryptohome_recovery.html   |  4 ++--
+ .../osauth/cryptohome_recovery_setup.html     |  4 ++--
+ .../screens/osauth/enter_old_password.html    |  2 +-
+ .../screens/osauth/local_password_setup.html  |  2 +-
+ .../osauth/remove_local_auth_factors.html     |  2 +-
+ .../translations/ui_chromeos_strings_vi.xtb   |  2 ++
+ ui/chromeos/ui_chromeos_strings.grd           | 24 +++++++++----------
+ 34 files changed, 87 insertions(+), 75 deletions(-)
+
+diff --git a/ash/ash_strings.grd b/ash/ash_strings.grd
+index 6c3b589124..7d493b5f76 100644
+--- a/ash/ash_strings.grd
++++ b/ash/ash_strings.grd
+@@ -5336,7 +5336,7 @@ No devices connected.
+       </if>
+       <if expr="not _google_chrome">
+         <message name="IDS_ASH_MESSAGE_CENTER_SYSTEM_APP_NAME" desc="The source of a system-generated notification, as displayed to the user.">
+-          ChromiumOS
++          colorburst
+         </message>
+       </if>
+       <message name="IDS_ASH_MESSAGE_CENTER_ACCELERATOR_NO_NOTIFICATIONS" desc="The toast message displayed when Alt+Shift+N is pressed but there are no notifications.">
+diff --git a/ash/login/resources/ash_login_strings.grd b/ash/login/resources/ash_login_strings.grd
+index e81b55df26..145bb37630 100644
+--- a/ash/login/resources/ash_login_strings.grd
++++ b/ash/login/resources/ash_login_strings.grd
+@@ -2155,17 +2155,17 @@
+       </message>
+ 
+       <!-- colorburst: strings for the OOBE local-account screen -->
+-      <message name="IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_LABEL" desc="The label of the button that sets the device up with an account that exists only on this device, with no Google Account.">
+-        Without a Google Account
++      <message name="IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_LABEL" desc="The label of the button that sets the device up with an account that exists only on this device.">
++        Create a local account
+       </message>
+       <message name="IDS_OOBE_USER_CREATION_LOCAL_ACCOUNT_BUTTON_DESCRIPTION" desc="The description of the button that sets the device up with an account that exists only on this device.">
+-        Create an account that stays on this device. No Google Account, no internet needed.
++        An account that stays on this computer. No internet connection needed.
+       </message>
+       <message name="IDS_OOBE_LOCAL_ACCOUNT_TITLE" desc="Title of the screen that creates an account which exists only on this device.">
+         Create your account
+       </message>
+       <message name="IDS_OOBE_LOCAL_ACCOUNT_SUBTITLE" desc="Subtitle of the screen that creates an account which exists only on this device.">
+-        This account lives on this device only. Nothing is sent to Google, and you can use it without an internet connection. You will choose a password next.
++        This account lives on this computer only, and works without an internet connection. You will choose a password next.
+       </message>
+       <message name="IDS_OOBE_LOCAL_ACCOUNT_NAME_LABEL" desc="Label of the text field where the user types the name of their device-local account.">
+         Name
+diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+index d19c217870..97a2e8c7ef 100644
+--- a/chrome/app/chromium_strings.grd
++++ b/chrome/app/chromium_strings.grd
+@@ -294,10 +294,10 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
+         </then>
+         <else>
+           <message name="IDS_PRODUCT_NAME" desc="The Chrome application name" translateable="false">
+-            Chromium
++            colorburst
+           </message>
+           <message name="IDS_SHORT_PRODUCT_NAME" desc="The Chrome application short name." translateable="false">
+-            Chromium
++            colorburst
+           </message>
+         </else>
+       </if>
+@@ -339,13 +339,13 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
+       </if>
+       <if expr="is_chromeos">
+         <message name="IDS_PRODUCT_OS_NAME" desc="The ChromeOS application name">
+-          ChromiumOS
++          colorburst
+         </message>
+         <message name="IDS_SHORT_PRODUCT_OS_NAME" desc="The ChromeOS application short name">
+-          ChromiumOS
++          colorburst
+         </message>
+         <message name="IDS_INSTALLED_PRODUCT_OS_NAME" desc="Installed OS name">
+-          ChromiumOS
++          colorburst
+         </message>
+       </if>
+       <message name="IDS_PRODUCT_LOGO_ENTERPRISE_ALT_TEXT" desc="Alt text for the Chromium Enterprise logo image." formatter_data="android_java">
+diff --git a/chrome/browser/resources/chromeos/login/components/oobe_icons.html b/chrome/browser/resources/chromeos/login/components/oobe_icons.html
+index 22917bdf4a..0f81c37446 100644
+--- a/chrome/browser/resources/chromeos/login/components/oobe_icons.html
++++ b/chrome/browser/resources/chromeos/login/components/oobe_icons.html
+@@ -142,6 +142,16 @@ found in the LICENSE file.
+         <path d="M16.5 7.767c2.13 0 4.04.732 5.543 2.168l4.16-4.158C23.69 3.437 20.407 2 16.5 2 10.832 2 5.928 5.25 3.542 9.988l4.845 3.757c1.14-3.427 4.336-5.978 8.113-5.978z" fill="#EA4335"></path>
+         <path d="M2 2h29v29H2"></path>
+       </g>
++      <!-- colorburst: the reference bars a colour TV locks its phase to. -->
++      <g id="colorburst" fill="none" fill-rule="evenodd">
++        <rect x="2" y="4" width="4" height="24" fill="#C0C0C0"></rect>
++        <rect x="6" y="4" width="4" height="24" fill="#C0C000"></rect>
++        <rect x="10" y="4" width="4" height="24" fill="#00C0C0"></rect>
++        <rect x="14" y="4" width="4" height="24" fill="#00C000"></rect>
++        <rect x="18" y="4" width="4" height="24" fill="#C000C0"></rect>
++        <rect x="22" y="4" width="4" height="24" fill="#C00000"></rect>
++        <rect x="26" y="4" width="4" height="24" fill="#0000C0"></rect>
++      </g>
+       <g id="kiosk" fill-rule="evenodd" clip-rule="evenodd">
+         <path d="M2.6665 5.33317C2.6665 3.86041 3.86041 2.6665 5.33317 2.6665H26.6665C28.1393 2.6665 29.3332 3.86041 29.3332 5.33317V17.3332C29.3332 18.8059 28.1393 19.9998 26.6665 19.9998H19.9998V26.6665H23.9998V29.3332H7.99984V26.6665H11.9998V19.9998H5.33317C3.86041 19.9998 2.6665 18.8059 2.6665 17.3332V5.33317ZM5.33317 5.33317H26.6665V17.3332H5.33317V5.33317ZM14.6665 26.6665H17.3332V19.9998H14.6665V26.6665Z"></path>
+       </g>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/consolidated_consent.html b/chrome/browser/resources/chromeos/login/screens/common/consolidated_consent.html
+index c84eba751e..a9b338358b 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/consolidated_consent.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/consolidated_consent.html
+@@ -47,7 +47,7 @@ found in the LICENSE file.
+ <oobe-loading-dialog id="progressDialog" for-step="loading"
+     role="dialog" title-key="consolidatedConsentLoading"
+     aria-label$="[[i18nDynamic(locale, 'consolidatedConsentLoading')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ 
+ <!-- ERROR DIALOG -->
+@@ -78,7 +78,7 @@ found in the LICENSE file.
+     role="dialog"
+     aria-label$="[[i18nDynamic(locale,
+                   'consolidatedConsentGoogleEulaTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'consolidatedConsentGoogleEulaTitle')]]
+   </h1>
+@@ -100,7 +100,7 @@ found in the LICENSE file.
+     role="dialog"
+     aria-label$="[[i18nDynamic(locale,
+                   'consolidatedConsentCrosEulaTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'consolidatedConsentCrosEulaTitle')]]
+   </h1>
+@@ -121,7 +121,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="arcTosDialog" for-step="arc" role="dialog"
+     aria-label$="[[i18nDynamic(locale,
+                   'consolidatedConsentArcTermsTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'consolidatedConsentArcTermsTitle')]]
+   </h1>
+@@ -142,7 +142,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="privacyPolicyDialog" for-step="privacy"
+     role="dialog" aria-label$="[[i18nDynamic(locale,
+                                 'consolidatedConsentPrivacyTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'consolidatedConsentPrivacyTitle')]]
+   </h1>
+@@ -163,7 +163,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="loadedDialog" for-step="loaded" role="dialog"
+     aria-label$="[[i18nDynamic(locale, 'consolidatedConsentHeader')]]"
+     read-more>
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[getTitle(locale, isTosHidden, isChildAccount, isDemo)]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/gaia_info.html b/chrome/browser/resources/chromeos/login/screens/common/gaia_info.html
+index 189a1a101b..babe0901a7 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/gaia_info.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/gaia_info.html
+@@ -24,7 +24,7 @@ found in the LICENSE file.
+ 
+ <oobe-adaptive-dialog id="gaiaInfoDialog" role="dialog"
+     for-step="overview">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title" id="gaia-info-title" aria-live="polite">
+     [[i18nDynamic(locale, 'gaiaInfoScreenTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/gaia_signin.html b/chrome/browser/resources/chromeos/login/screens/common/gaia_signin.html
+index b59778c35f..e0891ecb14 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/gaia_signin.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/gaia_signin.html
+@@ -57,7 +57,7 @@ found in the LICENSE file.
+ </security-token-pin>
+ <oobe-loading-dialog title-key="gaiaLoading"
+     id="step-loading" for-step="loading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-modal-dialog id="enrollmentNudge">
+   <div slot="title">
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/guest_tos.html b/chrome/browser/resources/chromeos/login/screens/common/guest_tos.html
+index c113d5db51..97ad206b86 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/guest_tos.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/guest_tos.html
+@@ -24,14 +24,14 @@ found in the LICENSE file.
+ <oobe-loading-dialog id="loading" for-step="loading" role="dialog"
+     title-key="guestTosLoading"
+     aria-label$="[[i18nDynamic(locale, 'guestTosLoading')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ 
+ <!-- Google EULA Dialog -->
+ <oobe-adaptive-dialog id="googleEulaDialog" for-step="google-eula"
+     role="dialog"
+     aria-label$="[[i18nDynamic(locale, 'guestTosGoogleEulaTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'guestTosGoogleEulaTitle')]]
+   </h1>
+@@ -52,7 +52,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="crosEulaDialog" for-step="cros-eula"
+ role="dialog"
+ aria-label$="[[i18nDynamic(locale, 'guestTosCrosEulaTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'guestTosCrosEulaTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/hw_data_collection.html b/chrome/browser/resources/chromeos/login/screens/common/hw_data_collection.html
+index 540dfb839f..8ff0a5dae6 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/hw_data_collection.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/hw_data_collection.html
+@@ -19,7 +19,7 @@ found in the LICENSE file.
+   }
+ </style>
+ <oobe-adaptive-dialog id="dialog" role="dialog" for-step="overview">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">[[i18nDynamic(locale, 'HWDataCollectionTitle')]]</h1>
+   <div slot="content" class="flex layout vertical center-justified">
+     <span inner-h-t-m-l="[[getHwDataCollectionContent_(locale)]]"></span>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/online_authentication_screen.html b/chrome/browser/resources/chromeos/login/screens/common/online_authentication_screen.html
+index 9064354c91..b70e9d6272 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/online_authentication_screen.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/online_authentication_screen.html
+@@ -5,5 +5,5 @@ found in the LICENSE file.
+ -->
+ 
+ <oobe-loading-dialog title-key="gaiaLoading" for-step="loading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/os_install.html b/chrome/browser/resources/chromeos/login/screens/common/os_install.html
+index 3c8bf6d3f2..4e0f2218f9 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/os_install.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/os_install.html
+@@ -48,7 +48,7 @@ found in the LICENSE file.
+     role="dialog" for-step="intro"
+     aria-label$="[[i18nDynamic(
+         locale, 'osInstallDialogIntroTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title" id="osInstallDialogIntroTitleId">
+     [[i18nDynamic(locale, 'osInstallDialogIntroTitle')]]</h1>
+   <div slot="subtitle">
+@@ -105,7 +105,7 @@ found in the LICENSE file.
+     subtitle-key="osInstallDialogInProgressSubtitle"
+     title-key="osInstallDialogInProgressTitle"
+     aria-label$="[[i18nDynamic(locale, 'osInstallDialogInProgressTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ 
+ <oobe-adaptive-dialog id="osInstallDialogError"
+@@ -152,7 +152,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="osInstallDialogSuccess"
+     role="dialog" for-step="success"
+     aria-label$="[[i18nDynamic(locale, 'osInstallDialogSuccessTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">[[i18nDynamic(locale, 'osInstallDialogSuccessTitle')]]
+   </h1>
+   <div slot="subtitle" id="osInstallDialogSuccessSubtitile">
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/os_trial.html b/chrome/browser/resources/chromeos/login/screens/common/os_trial.html
+index abc5c20c01..5ff664cf40 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/os_trial.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/os_trial.html
+@@ -9,7 +9,7 @@
+ 
+ <oobe-adaptive-dialog id="osTrialDialog" role="dialog"
+     aria-label$="[[i18nDynamic(locale, 'osTrialTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">[[i18nDynamic(locale, 'osTrialTitle')]]</h1>
+   <span inner-h-t-m-l="[[i18nAdvancedDynamic(locale, 'osTrialSubtitle')]]"
+       slot="subtitle"></span>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/parental_handoff.html b/chrome/browser/resources/chromeos/login/screens/common/parental_handoff.html
+index 09a596a064..3051206dea 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/parental_handoff.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/parental_handoff.html
+@@ -9,7 +9,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="parentalHandoffDialog" role="dialog"
+   aria-label$="[[i18nDynamic(locale,
+     'parentalHandoffDialogTitle', username)]]">
+-<iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++<iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ <h1 slot="title">
+   [[i18nDynamic(locale, 'parentalHandoffDialogTitle', username)]]
+ </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/perks_discovery.html b/chrome/browser/resources/chromeos/login/screens/common/perks_discovery.html
+index 9d40fc4740..155b809249 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/perks_discovery.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/perks_discovery.html
+@@ -25,7 +25,7 @@ found in the LICENSE file.
+ </style>
+ <oobe-loading-dialog id="progressDialog" for-step="loading"
+     title-key="perksLoading" role="dialog">
+-    <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++    <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-adaptive-dialog id="perkDiscovery" for-step="overview"
+     role="dialog"
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/quick_start.html b/chrome/browser/resources/chromeos/login/screens/common/quick_start.html
+index 8ec8429574..bdfd155d90 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/quick_start.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/quick_start.html
+@@ -225,7 +225,7 @@ found in the LICENSE file.
+ <!-- CONFIRM GOOGLE ACCOUNT -->
+ <oobe-adaptive-dialog id="confirmAccountDialog"
+     for-step="confirm_google_account" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg">
++  <iron-icon slot="icon" icon="oobe-32:colorburst">
+   </iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'quickStartConfirmAccountTitle')]]
+@@ -247,7 +247,7 @@ found in the LICENSE file.
+ <!-- SIGNING IN STEP -->
+ <oobe-adaptive-dialog for-step="signing_in" id="gaiaTransferDialog"
+     aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg">
++  <iron-icon slot="icon" icon="oobe-32:colorburst">
+   </iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'quickStartAccountTransferTitle')]]
+@@ -285,7 +285,7 @@ found in the LICENSE file.
+ <!-- SETUP COMPLETE STEP -->
+ <oobe-adaptive-dialog id="setupCompleteDialog"
+     for-step="setup_complete" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg">
++  <iron-icon slot="icon" icon="oobe-32:colorburst">
+   </iron-icon>
+   <h1 slot="title">
+     <div inner-h-t-m-l="[[getSetupCompleteTitle(locale)]]">
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/recommend_apps.html b/chrome/browser/resources/chromeos/login/screens/common/recommend_apps.html
+index 818ba56c02..81ce98a99c 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/recommend_apps.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/recommend_apps.html
+@@ -16,7 +16,7 @@ found in the LICENSE file.
+ </style>
+ <oobe-loading-dialog id="loadingDialog" for-step="loading"
+     title-key="recommendAppsLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-adaptive-dialog id="appsDialog" role="dialog"
+     aria-label$="[[i18nDynamic(locale, 'recommendAppsScreenTitle')]]"
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/saml_confirm_password.html b/chrome/browser/resources/chromeos/login/screens/common/saml_confirm_password.html
+index e4d3167438..3fdd0f4778 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/saml_confirm_password.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/saml_confirm_password.html
+@@ -60,7 +60,7 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-loading-dialog id="progress" role="dialog" for-step="progress"
+     title-key="gaiaLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-modal-dialog id="cancelConfirmDlg">
+   <div slot="title">
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/sync_consent.html b/chrome/browser/resources/chromeos/login/screens/common/sync_consent.html
+index c70fdfc20e..f12a07d5d9 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/sync_consent.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/sync_consent.html
+@@ -218,6 +218,6 @@ found in the LICENSE file.
+ 
+ <oobe-loading-dialog id="sync-loading" role="dialog" for-step="loading"
+     title-key="gaiaLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ 
+diff --git a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+index 9e35fb91ef..62eb5eb05e 100644
+--- a/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
++++ b/chrome/browser/resources/chromeos/login/screens/common/user_creation.html
+@@ -29,7 +29,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="userCreationDialog"
+     for-step="create"
+     role="dialog">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title" aria-live="polite">
+     [[i18nDynamic(locale, titleKey_)]]
+   </h1>
+@@ -191,7 +191,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="childSetupDialog"
+     role="dialog"
+     for-step="child-setup">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title" aria-live="polite">
+     [[i18nDynamic(locale, 'userCreationChildSetupTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/login/checking_downloading_update.html b/chrome/browser/resources/chromeos/login/screens/login/checking_downloading_update.html
+index df6c677cfc..3692317e95 100644
+--- a/chrome/browser/resources/chromeos/login/screens/login/checking_downloading_update.html
++++ b/chrome/browser/resources/chromeos/login/screens/login/checking_downloading_update.html
+@@ -25,7 +25,7 @@ found in the LICENSE file.
+   id="checking-for-updates-dialog"
+   footer-shrinkable
+ >
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">[[i18nDynamic(locale, 'checkingForUpdates')]]</h1>
+   <div slot="subtitle" class="update-subtitle" id="checkingForUpdatesMsg">
+     [[i18nDynamic(locale, checkingForUpdatesKey)]]
+@@ -60,7 +60,7 @@ found in the LICENSE file.
+                                                updateCompleted)]]"
+   aria-live="polite"
+ >
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">[[i18nDynamic(locale, 'updatingTitle')]]</h1>
+   <div slot="subtitle">
+     <div>[[i18nDynamic(locale, downloadingUpdatesKey)]]</div>
+@@ -94,6 +94,6 @@ found in the LICENSE file.
+   hidden="[[!updateCompleted]]"
+   aria-live="polite"
+ >
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">[[i18nDynamic(locale, 'updateCompeletedMsg')]]</h1>
+ </oobe-adaptive-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/login/encryption_migration.html b/chrome/browser/resources/chromeos/login/screens/login/encryption_migration.html
+index 3de3b879dd..876e80fb04 100644
+--- a/chrome/browser/resources/chromeos/login/screens/login/encryption_migration.html
++++ b/chrome/browser/resources/chromeos/login/screens/login/encryption_migration.html
+@@ -82,7 +82,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="migrating-dialog" role="dialog"
+     for-step="migrating"
+     aria-label$="[[i18nDynamic(locale, 'migrationMigratingTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'migrationMigratingTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/auto_enrollment_check.html b/chrome/browser/resources/chromeos/login/screens/oobe/auto_enrollment_check.html
+index 108c7e2cd9..89ee4c0053 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/auto_enrollment_check.html
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/auto_enrollment_check.html
+@@ -4,5 +4,5 @@ Use of this source code is governed by a BSD-style license that can be
+ found in the LICENSE file.
+ -->
+ <oobe-loading-dialog title-key="[[getLoadingTitle()]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/consumer_update.html b/chrome/browser/resources/chromeos/login/screens/oobe/consumer_update.html
+index 35a0bfde0f..a9c5a8e269 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/consumer_update.html
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/consumer_update.html
+@@ -46,7 +46,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog id="consumerUpdateCellularDialog"
+     for-step="cellular" tabindex="0"
+     aria-live="polite" footer-shrinkable>
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'consumerUpdateScreenCellularTitle')]]
+   </h1>
+@@ -77,7 +77,7 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-adaptive-dialog footer-shrinkable id="consumerUpdateCheckingDialog"
+     for-step="checking" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'checkingForUpdates')]]
+   </h1>
+@@ -179,11 +179,11 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-loading-dialog id="consumerUpdateRestartingDialog"
+     title-key="updateCompeletedRebootingMsg" for-step="restart">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-adaptive-dialog footer-shrinkable id="consumerUpdateCompleteDialog"
+     for-step="reboot" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'updateCompeletedMsg')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/fjord_fw_update.html b/chrome/browser/resources/chromeos/login/screens/oobe/fjord_fw_update.html
+index 5291315bce..dca003ad35 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/fjord_fw_update.html
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/fjord_fw_update.html
+@@ -1,4 +1,4 @@
+ <oobe-loading-dialog id="fjordFwUpdateDialog"
+     title-key="fjordFwUpdateTitle" subtitle-key="fjordFwUpdateSubtitle">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_download.html b/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_download.html
+index 13451dee55..8a4d64390d 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_download.html
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_download.html
+@@ -1,5 +1,5 @@
+ <oobe-loading-dialog id="fjordImageDownloadDialog"
+     role="dialog"
+     title-key="fjordImageDownloadTitle">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_selection.html b/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_selection.html
+index a1b320841d..2e6a7bd4c7 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_selection.html
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/fjord_image_selection.html
+@@ -16,7 +16,7 @@
+ </style>
+ <oobe-adaptive-dialog id="fjordImageSelectionDialog"
+     role="dialog">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'fjordImageSelectionTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/oobe/update.html b/chrome/browser/resources/chromeos/login/screens/oobe/update.html
+index f77ad10307..5d5efdc0e4 100644
+--- a/chrome/browser/resources/chromeos/login/screens/oobe/update.html
++++ b/chrome/browser/resources/chromeos/login/screens/oobe/update.html
+@@ -37,7 +37,7 @@ found in the LICENSE file.
+ <oobe-adaptive-dialog for-step="cellular" tabindex="0"
+     aria-live="polite" footer-shrinkable
+     id="cellular-permission-dialog">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nRecursive(locale, 'updateOverCellularPromptTitle',
+                     'productName')]]
+@@ -61,7 +61,7 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-adaptive-dialog footer-shrinkable id="checking-for-updates-dialog"
+     for-step="checking" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'checkingForUpdates')]]
+   </h1>
+@@ -76,11 +76,11 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-loading-dialog id="checking-update" for-step="checking-software"
+     title-key="gettingDeviceReadyTitle">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-adaptive-dialog footer-shrinkable id="update-in-progress-dialog"
+     for-step="update" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'updateStatusTitle')]]
+   </h1>
+@@ -158,18 +158,18 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-loading-dialog id="restarting-dialog"
+     title-key="updateCompeletedRebootingMsg" for-step="restart">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ <oobe-adaptive-dialog footer-shrinkable id="better-update-complete-dialog"
+     for-step="reboot" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'updateCompeletedMsg')]]
+   </h1>
+ </oobe-adaptive-dialog>
+ <oobe-adaptive-dialog footer-shrinkable id="opt-out-info-dialog"
+     for-step="opt-out-info" aria-live="polite">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'noUpdateAvailableTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery.html b/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery.html
+index 95d0c84440..27d7beadbc 100644
+--- a/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery.html
++++ b/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery.html
+@@ -5,14 +5,14 @@ found in the LICENSE file. -->
+ <style include="oobe-dialog-host-styles"></style>
+ <oobe-loading-dialog id="loadingDialog" role="dialog" for-step="loading"
+     title-key="gaiaLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ 
+ <oobe-adaptive-dialog id="reauthNotificationDialog"
+     role="dialog" for-step="reauth-notification"
+     aria-label$="[[i18nDynamic(locale,
+         'cryptohomeRecoveryReauthNotificationTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'cryptohomeRecoveryReauthNotificationTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery_setup.html b/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery_setup.html
+index fb64f07f3d..5ef7bf0abf 100644
+--- a/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery_setup.html
++++ b/chrome/browser/resources/chromeos/login/screens/osauth/cryptohome_recovery_setup.html
+@@ -5,12 +5,12 @@ found in the LICENSE file. -->
+ <style include="oobe-dialog-host-styles"></style>
+ <oobe-loading-dialog id="loading" role="dialog" for-step="loading"
+     title-key="gaiaLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+ 
+ <oobe-adaptive-dialog id="errorDialog" role="dialog" for-step="error"
+     aria-label$="[[i18nDynamic(locale, 'cryptohomeRecoverySetupErrorTitle')]]">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+   <h1 slot="title">
+     [[i18nDynamic(locale, 'cryptohomeRecoverySetupErrorTitle')]]
+   </h1>
+diff --git a/chrome/browser/resources/chromeos/login/screens/osauth/enter_old_password.html b/chrome/browser/resources/chromeos/login/screens/osauth/enter_old_password.html
+index dcd7def9cf..41d4de1ce0 100644
+--- a/chrome/browser/resources/chromeos/login/screens/osauth/enter_old_password.html
++++ b/chrome/browser/resources/chromeos/login/screens/osauth/enter_old_password.html
+@@ -51,5 +51,5 @@ found in the LICENSE file.
+ 
+ <oobe-loading-dialog id="progress" role="dialog" for-step="progress"
+     title-key="gaiaLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/osauth/local_password_setup.html b/chrome/browser/resources/chromeos/login/screens/osauth/local_password_setup.html
+index b0070ea36a..62058bbee4 100644
+--- a/chrome/browser/resources/chromeos/login/screens/osauth/local_password_setup.html
++++ b/chrome/browser/resources/chromeos/login/screens/osauth/local_password_setup.html
+@@ -41,5 +41,5 @@ found in the LICENSE file.
+ </oobe-adaptive-dialog>
+ <oobe-loading-dialog id="progress" role="dialog" for-step="progress"
+     title-key="gaiaLoading">
+-  <iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++  <iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+diff --git a/chrome/browser/resources/chromeos/login/screens/osauth/remove_local_auth_factors.html b/chrome/browser/resources/chromeos/login/screens/osauth/remove_local_auth_factors.html
+index 45ec1dc3fd..88d4a33596 100644
+--- a/chrome/browser/resources/chromeos/login/screens/osauth/remove_local_auth_factors.html
++++ b/chrome/browser/resources/chromeos/login/screens/osauth/remove_local_auth_factors.html
+@@ -31,5 +31,5 @@ found in the LICENSE file.
+ 
+ <oobe-loading-dialog id="progress" role="dialog" for-step="progress"
+   title-key="gaiaLoading">
+-<iron-icon slot="icon" icon="oobe-32:googleg"></iron-icon>
++<iron-icon slot="icon" icon="oobe-32:colorburst"></iron-icon>
+ </oobe-loading-dialog>
+\ No newline at end of file
+diff --git a/ui/chromeos/translations/ui_chromeos_strings_vi.xtb b/ui/chromeos/translations/ui_chromeos_strings_vi.xtb
+index cc6c9957aa..d3f6823e64 100644
+--- a/ui/chromeos/translations/ui_chromeos_strings_vi.xtb
++++ b/ui/chromeos/translations/ui_chromeos_strings_vi.xtb
+@@ -1116,4 +1116,6 @@
+ <translation id="988685240266037636">Một tệp có tên <ph name="FILE_NAME" /> đã tồn tại. Bạn có muốn thay thế tệp đó không?</translation>
+ <translation id="992401651319295351">Bạn còn <ph name="RETRIES" /> lần nhập. Bạn sẽ không thể dùng mạng này cho đến khi thiết lập một mã PIN mới.</translation>
+ <translation id="996903396648773764"><ph name="NUMBER_OF_MB" /> MB</translation>
++<translation id="6869056123412990582">máy tính</translation>
++<translation id="5927129094860015950">máy tính</translation>
+ </translationbundle>
+\ No newline at end of file
+diff --git a/ui/chromeos/ui_chromeos_strings.grd b/ui/chromeos/ui_chromeos_strings.grd
+index a509564781..85653bc7ec 100644
+--- a/ui/chromeos/ui_chromeos_strings.grd
++++ b/ui/chromeos/ui_chromeos_strings.grd
+@@ -594,42 +594,42 @@
+ 
+       <!-- Generic device type names -->
+       <message name="IDS_CHROMEBASE_DEVICE_NAME" desc="The device name for a Chromebase (versus say Chromebox)">
+-        Chromebase
++        computer
+       </message>
+       <message name="IDS_CHROMEBIT_DEVICE_NAME" desc="The device name for a Chromebit (versus say Chromebox)">
+-        Chromebit
++        computer
+       </message>
+       <message name="IDS_CHROMEBOOK_DEVICE_NAME" desc="The device name for a Chromebook (versus say Chromebox)">
+-        Chromebook
++        computer
+       </message>
+       <message name="IDS_CHROMEBOX_DEVICE_NAME" desc="The device name for a Chromebox (versus say Chromebook)">
+-        Chromebox
++        computer
+       </message>
+       <message name="IDS_REVEN_DEVICE_NAME" desc="The device name for a Reven Device">
+-        ChromeOS Flex device
++        computer
+       </message>
+       <message name="IDS_GENERIC_CHROMEOS_DEVICE_NAME" desc="The device name for a generic Chrome device">
+-        Chrome device
++        computer
+       </message>
+ 
+       <!-- Generic device type names (plural forms) -->
+       <message name="IDS_CHROMEBASE_DEVICE_NAME_IN_PLURAL" desc="The device name (plural) for Chromebase (versus say Chromeboxes)">
+-        Chromebases
++        computers
+       </message>
+       <message name="IDS_CHROMEBIT_DEVICE_NAME_IN_PLURAL" desc="The device name (plural) for Chromebit (versus say Chromeboxes)">
+-        Chromebits
++        computers
+       </message>
+       <message name="IDS_CHROMEBOOK_DEVICE_NAME_IN_PLURAL" desc="The device name (plural) for Chromebook (versus say Chromeboxes)">
+-        Chromebooks
++        computers
+       </message>
+       <message name="IDS_CHROMEBOX_DEVICE_NAME_IN_PLURAL" desc="The device name (plural) for Chromebox (versus say Chromebooks)">
+-        Chromeboxes
++        computers
+       </message>
+       <message name="IDS_REVEN_DEVICE_NAME_IN_PLURAL" desc="The device name (plural) for a Reven Device">
+-        ChromeOS Flex devices
++        computers
+       </message>
+       <message name="IDS_GENERIC_CHROMEOS_DEVICE_NAME_IN_PLURAL" desc="The device name (plural) for generic Chrome device">
+-        Chrome devices
++        computers
+       </message>
+ 
+       <!-- Input method strings. -->
+-- 
+2.53.0
+
