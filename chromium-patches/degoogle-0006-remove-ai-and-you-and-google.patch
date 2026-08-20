@@ -1,4 +1,4 @@
-From 0c1e824bed129987a1f000fa3761133ecd8818d8 Mon Sep 17 00:00:00 2001
+From 5a09b9b0b5d16c85cf9dd3aa67d76d2f87792efd Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
  <212658678+luuoaoa@users.noreply.github.com>
 Date: Thu, 20 Aug 2026 09:19:30 -0700
@@ -21,10 +21,10 @@ chrome://settings still exposed two Google surfaces this build does not want:
   container are removed so it is absent from the nav and from Settings search.
 ---
  chrome/browser/resources/settings/route.ts    | 10 +++++++
- .../settings/settings_main/settings_main.html | 15 ++++-------
- .../settings/settings_menu/settings_menu.html | 26 +++++--------------
- .../browser/ui/webui/settings/settings_ui.cc  | 19 +++++++++-----
- 4 files changed, 34 insertions(+), 36 deletions(-)
+ .../settings/settings_main/settings_main.html | 15 ++++------
+ .../settings/settings_menu/settings_menu.html | 28 ++++++-------------
+ .../browser/ui/webui/settings/settings_ui.cc  | 19 +++++++++----
+ 4 files changed, 36 insertions(+), 36 deletions(-)
 
 diff --git a/chrome/browser/resources/settings/route.ts b/chrome/browser/resources/settings/route.ts
 index 0f89633578..6ef0976e14 100644
@@ -74,7 +74,7 @@ index 96e3bcef6a..39f6674ac3 100644
    <template is="dom-if" if="[[showPage_(pageVisibility_.privacy)]]">
      <div slot="view" id="privacy">
 diff --git a/chrome/browser/resources/settings/settings_menu/settings_menu.html b/chrome/browser/resources/settings/settings_menu/settings_menu.html
-index e47012903b..191d35311c 100644
+index e47012903b..2755c4e3d9 100644
 --- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
 +++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
 @@ -45,18 +45,9 @@
@@ -99,7 +99,7 @@ index e47012903b..191d35311c 100644
          <a role="menuitem" id="autofill" href="/autofill"
              on-click="onAutofillClick_"
              class="cr-nav-menu-item"
-@@ -79,14 +70,9 @@
+@@ -79,14 +70,11 @@
            $i18n{performancePageTitle}
            <cr-ripple></cr-ripple>
          </a>
@@ -112,8 +112,10 @@ index e47012903b..191d35311c 100644
 -          <cr-ripple></cr-ripple>
 -        </a>
 +        <!-- NOTE(colorburst fork): the "AI in Chrome" menu item is removed. It
-+             is additionally gated on `showAiPage`, which is hardcoded false in
-+             settings_ui.cc, and its route is not registered (route.ts). -->
++             is additionally gated on the showAiPage flag, hardcoded false in
++             settings_ui.cc, and its route is not registered (route.ts).
++             (No backticks in this comment: the file is wrapped in an html
++             template literal, so a backtick here would terminate it.) -->
          <a role="menuitem" id="appearance" href="/appearance"
              hidden="[[!pageVisibility_.appearance]]"
              class="cr-nav-menu-item">
