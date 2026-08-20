@@ -6,10 +6,9 @@
 #   chromium/rebuild-release.sh
 #
 # What it does, in order:
-#   1. Normalise the patch state of all three trees to the committed series:
+#   1. Normalise the patch state of both patched trees to the committed series:
 #        - chromium-src : hard-reset to the pinned base, then apply-all.sh
 #        - platform2    : the update_engine device-id patch (idempotent)
-#        - chromite     : the DLC factory-install patch (idempotent)
 #   2. Nuke the board build cache for a clean build -- the colorburst sysroot
 #      (+ its binpkgs), the retired amd64-generic sysroot, and old images.
 #      KEEPS out/sdk (the host SDK, expensive to rebuild) and .cache/distfiles
@@ -53,12 +52,9 @@ else
     platform2-patches/apply.sh chromiumos/src/platform2
 fi
 
-log "chromite: DLC factory-install patch (termina/edk2-ovmf allowlist)"
-if grep -q 'termina-dlc' chromiumos/chromite/lib/dlc_allowlist.py 2>/dev/null; then
-    echo "    already applied -- skipping"
-else
-    chromite-patches/apply.sh chromiumos/chromite
-fi
+# (No chromite patch: the DLC factory-install approach was reverted -- Crostini
+# DLCs are served from the update server, so the stock chromite/dlc_allowlist.py
+# and upstream termina-dlc ebuilds are used unchanged.)
 
 # --- 2. nuke the board build cache (clean build) ----------------------------
 # Done inside the container so root-owned build artefacts can be removed.
