@@ -43,9 +43,27 @@ PAYLOAD="colorburst-${VER}-full.bin"
 OUT_HOST="chromiumos/ota-release/${VER}"
 mkdir -p "$OUT_HOST"
 
-# Chroot-side paths. The image lives under src/build/images (inside the
-# checkout, so visible in the chroot); ota-release/ likewise.
-IMG_CHROOT="/mnt/host/source/${IMG_HOST#"$DEVENV"/chromiumos/}"
+# Chroot-side paths. Inside cros_sdk, /mnt/host/source is the top of the
+# ChromiumOS checkout (our chromiumos/ dir). The image lives under
+# src/build/images (inside the checkout, so visible in the chroot); the
+# ota-release/ output dir likewise.
+#
+# IMG_HOST is canonical (readlink -f), so the prefix we strip must be canonical
+# too. $DEVENV can arrive via the `chromium-os` symlink (which resolves to
+# colorburst-os/chromium-os), and an un-canonicalized "$DEVENV/chromiumos/"
+# then fails to match IMG_HOST's resolved prefix -- leaving the whole absolute
+# path in place and producing a doubled "/mnt/host/source//home/wasabi/..."
+# path that does not exist. Canonicalize the checkout root before stripping.
+CROS_ROOT="$(readlink -f "$DEVENV/chromiumos")"
+IMG_CHROOT="/mnt/host/source/${IMG_HOST#"$CROS_ROOT"/}"
+case "$IMG_CHROOT" in
+    /mnt/host/source//*|*/home/*)
+        echo "gen-payload: could not map image to a chroot path" >&2
+        echo "  IMG_HOST=$IMG_HOST" >&2
+        echo "  CROS_ROOT=$CROS_ROOT" >&2
+        echo "  IMG_CHROOT=$IMG_CHROOT (image must live under the checkout)" >&2
+        exit 1 ;;
+esac
 OUT="/mnt/host/source/ota-release/${VER}"
 
 run() { ./cros-sdk.sh cros_sdk -- "$@"; }
