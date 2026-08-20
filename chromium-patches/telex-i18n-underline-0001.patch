@@ -1,0 +1,126 @@
+From 7f87a5525e54445a85da9074b22149d42266f9eb Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 09:22:32 -0700
+Subject: [PATCH] Vietnamese IME: translate the restore-non-VN strings;
+ underline off by default
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two loose ends on the Vietnamese Telex/VNI options page.
+
+i18n: every user-visible string on the page already had a vi translation
+except the colorburst-added "restore non-Vietnamese words" toggle (label +
+description, from telex-nonvn-restore). A vi session showed those two in
+English. Add the vi entries to generated_resources_vi.xtb (fingerprints from
+in-tree grit against the current grd wording):
+  - "Restore non-Vietnamese words"
+      -> "Khôi phục từ không phải tiếng Việt"
+  - "Keep the original keys for words that aren't valid Vietnamese
+     (e.g. "worldcup")"
+      -> "Giữ nguyên các phím đã gõ cho những từ không hợp lệ trong tiếng Việt
+         (ví dụ: "worldcup")"
+The section headers other than "Shorthand typing" render as empty strings
+(spacers), and all other labels/descriptions were already translated.
+
+Underline default: the "Show underline for composition text" toggle defaulted
+ON for both Telex and VNI. Vietnamese composes a syllable at a time, so the
+underline sits under nearly everything typed and Windows UniKey (what our users
+expect) draws none. telex-phase0 already removed it on the extension path;
+flip the pref default to OFF so the native mojo path matches. Still
+user-toggleable. Flipped in CreateVietnamese{Telex,Vni}Settings (.value_or
+true -> false) and in the os-settings pref defaults
+(input_method_prefs_defaults.ts VIETNAMESE_{TELEX,VNI}_SHOW_UNDERLINE).
+---
+ chrome/app/resources/generated_resources_vi.xtb    |  2 ++
+ .../ash/input_method/input_method_settings.cc      | 14 ++++++++++++--
+ .../input_method_prefs_defaults.ts                 |  9 +++++++--
+ 3 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/app/resources/generated_resources_vi.xtb b/chrome/app/resources/generated_resources_vi.xtb
+index 11a15b21f5..c340ba9718 100644
+--- a/chrome/app/resources/generated_resources_vi.xtb
++++ b/chrome/app/resources/generated_resources_vi.xtb
+@@ -2991,6 +2991,7 @@ Bạn có thể quản lý các tùy chọn cài đặt của tài khoản này
+ <translation id="3294437725009624529">Khách</translation>
+ <translation id="3294686910656423119">Thống kê mức sử dụng và báo cáo sự cố</translation>
+ <translation id="3295241308788901889">Truyền thẻ</translation>
++<translation id="3296970551682512281">Khôi phục từ không phải tiếng Việt</translation>
+ <translation id="3297105622164376095">Được phép đưa ra lời nhắc đăng nhập qua bên thứ ba</translation>
+ <translation id="3297462367919448805">Thiết bị này không còn nhận được bản cập nhật bảo mật và bản cập nhật phần mềm tự động. Tuy nhiên, bạn có thể bật tính năng cập nhật bảo mật mở rộng.</translation>
+ <translation id="3297536526040732495">Tạm thời liên kết dữ liệu này với Tài khoản Google của bạn sau khi bạn đăng nhập để bảo vệ bạn trên các ứng dụng Google</translation>
+@@ -5405,6 +5406,7 @@ Nhấn tổ hợp phím Ctrl + Alt + Giảm độ sáng để thu nhỏ.</transl
+ <translation id="5133035646508467110">Nếu dùng chung thiết bị này với người khác, bạn có thể sử dụng vân tay để xác minh danh tính của mình mỗi khi sử dụng mật khẩu đã lưu</translation>
+ <translation id="5135533361271311778">Không thể tạo mục dấu trang.</translation>
+ <translation id="513555878193063507">Thêm APN mới</translation>
++<translation id="513834605209175892">Giữ nguyên các phím đã gõ cho những từ không hợp lệ trong tiếng Việt (ví dụ: "worldcup")</translation>
+ <translation id="5136343472380336530">Hãy đảm bảo cả hai thiết bị đã mở khóa, ở gần nhau và đã bật Bluetooth. <ph name="LINK_BEGIN" />Tìm hiểu thêm<ph name="LINK_END" /></translation>
+ <translation id="5136529877787728692">F7</translation>
+ <translation id="5138227688689900538">Ẩn bớt</translation>
+diff --git a/chrome/browser/ash/input_method/input_method_settings.cc b/chrome/browser/ash/input_method/input_method_settings.cc
+index 5a00630cff..d3de792326 100644
+--- a/chrome/browser/ash/input_method/input_method_settings.cc
++++ b/chrome/browser/ash/input_method/input_method_settings.cc
+@@ -136,9 +136,14 @@ mojom::VietnameseVniSettingsPtr CreateVietnameseVniSettings(
+   settings->enable_insert_double_horn_on_uo =
+       input_method_specific_pref.FindBool(kVnPrefVniInsertDoubleHornOnUo)
+           .value_or(false);
++  // colorburst: default OFF. Vietnamese composes a syllable at a time, so a
++  // composition underline sits under nearly everything typed; Windows UniKey
++  // (what our users expect) draws none. Consistent with telex-phase0, which
++  // removed the underline on the extension path, and with the UnikeyEngine
++  // default. User-toggleable.
+   settings->show_underline_for_composition_text =
+       input_method_specific_pref.FindBool(kVnPrefVniShowUnderline)
+-          .value_or(true);
++          .value_or(false);
+   // colorburst: default ON so mixed English/Vietnamese typing "just works"
+   // (invalid Vietnamese words keep their original keystrokes). Carried for
+   // parity with Telex; VNI is rule-based and does not honor it at runtime.
+@@ -167,9 +172,14 @@ mojom::VietnameseTelexSettingsPtr CreateVietnameseTelexSettings(
+   settings->enable_w_for_u_horn_shortcut =
+       input_method_specific_pref.FindBool(kVnPrefTelexInsertUHornOnW)
+           .value_or(false);
++  // colorburst: default OFF. Vietnamese composes a syllable at a time, so a
++  // composition underline sits under nearly everything typed; Windows UniKey
++  // (what our users expect) draws none. Consistent with telex-phase0, which
++  // removed the underline on the extension path, and with the UnikeyEngine
++  // default. User-toggleable.
+   settings->show_underline_for_composition_text =
+       input_method_specific_pref.FindBool(kVnPrefTelexShowUnderline)
+-          .value_or(true);
++          .value_or(false);
+   // colorburst: default ON so mixed English/Vietnamese typing "just works":
+   // when a typed word is not valid Vietnamese, the engine restores the original
+   // keystrokes instead of applying diacritics (e.g. "worldcup" stays
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
+index 729c96f29f..36699a001b 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
+@@ -64,7 +64,11 @@ export const OPTION_DEFAULT = {
+   [OptionType.VIETNAMESE_VNI_ALLOW_FLEXIBLE_DIACRITICS]: true,
+   [OptionType.VIETNAMESE_VNI_NEW_STYLE_TONE_MARK_PLACEMENT]: false,
+   [OptionType.VIETNAMESE_VNI_INSERT_DOUBLE_HORN_ON_UO]: false,
+-  [OptionType.VIETNAMESE_VNI_SHOW_UNDERLINE]: true,
++  // colorburst: default OFF so the os-settings toggle reads off and matches the
++  // pref default in input_method_settings.cc and the UnikeyEngine default. A
++  // composition underline sits under nearly every Vietnamese syllable; Windows
++  // UniKey draws none. Consistent with telex-phase0.
++  [OptionType.VIETNAMESE_VNI_SHOW_UNDERLINE]: false,
+   // colorburst: default ON so mixed English/Vietnamese typing "just works".
+   [OptionType.VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE]: true,
+   [OptionType.VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS]: true,
+@@ -74,7 +78,8 @@ export const OPTION_DEFAULT = {
+   // pref default in input_method_settings.cc (standalone w -> u-horn is opt-in
+   // because it mangles English w-words). See VIETNAMESE-IME-PERF.md.
+   [OptionType.VIETNAMESE_TELEX_INSERT_U_HORN_ON_W]: false,
+-  [OptionType.VIETNAMESE_TELEX_SHOW_UNDERLINE]: true,
++  // colorburst: default OFF (see the VNI underline note above and telex-phase0).
++  [OptionType.VIETNAMESE_TELEX_SHOW_UNDERLINE]: false,
+   // colorburst: default ON so mixed English/Vietnamese typing "just works"
+   // (invalid Vietnamese words keep their original keystrokes). Matches the pref
+   // default in input_method_settings.cc.
+-- 
+2.53.0
+

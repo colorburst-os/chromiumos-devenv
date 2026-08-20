@@ -1,0 +1,159 @@
+From 0c1e824bed129987a1f000fa3761133ecd8818d8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 09:19:30 -0700
+Subject: [PATCH] Remove the AI-in-Chrome and "You and Google" Settings
+ sections
+
+chrome://settings still exposed two Google surfaces this build does not want:
+
+- "AI in Chrome" (the AiPage / chrome://settings/ai section). Earlier work
+  only gated the OOBE AI carousel; the in-Settings section returned whenever
+  an AI feature, Glic/Gemini, or AI-mode-search flag was on. showAiPage -- the
+  one value the route, the left-nav item and the page container all consult --
+  is now hardcoded false in settings_ui.cc, and the runtime re-enable that
+  fired when the Glic page became visible after the FRE is removed, so no flag
+  flip can bring it back. The menu <a> is deleted outright as well.
+
+- "You and Google" (the people / sign-in-and-sync section). route.ts forces
+  visibility.people/ai false for every profile (not just guest) so the routes
+  are never registered; the menu <a> and the settings-people-page-index page
+  container are removed so it is absent from the nav and from Settings search.
+---
+ chrome/browser/resources/settings/route.ts    | 10 +++++++
+ .../settings/settings_main/settings_main.html | 15 ++++-------
+ .../settings/settings_menu/settings_menu.html | 26 +++++--------------
+ .../browser/ui/webui/settings/settings_ui.cc  | 19 +++++++++-----
+ 4 files changed, 34 insertions(+), 36 deletions(-)
+
+diff --git a/chrome/browser/resources/settings/route.ts b/chrome/browser/resources/settings/route.ts
+index 0f89633578..6ef0976e14 100644
+--- a/chrome/browser/resources/settings/route.ts
++++ b/chrome/browser/resources/settings/route.ts
+@@ -155,6 +155,16 @@ function createRoutes(): SettingsRoutes {
+ 
+   const visibility = pageVisibility || {};
+ 
++  // NOTE(colorburst fork): remove the "You and Google" people/sign-in-and-sync
++  // section and the "AI in Chrome" section for every profile, not just guest.
++  // The people, sync, account and AI routes below are all gated on these two
++  // flags, so forcing them false here means those sections are never
++  // registered as routes (no /people, /syncSetup, /ai, ... entries) and no
++  // feature flag can bring the routes back. The matching left-nav menu items
++  // and page containers are removed in settings_menu.html / settings_main.html.
++  visibility.people = false;
++  visibility.ai = false;
++
+   if (visibility.people !== false) {
+     r.PEOPLE = r.BASIC.createSection(
+         '/people', 'people', loadTimeData.getString('peoplePageTitle'));
+diff --git a/chrome/browser/resources/settings/settings_main/settings_main.html b/chrome/browser/resources/settings/settings_main/settings_main.html
+index 96e3bcef6a..39f6674ac3 100644
+--- a/chrome/browser/resources/settings/settings_main/settings_main.html
++++ b/chrome/browser/resources/settings/settings_main/settings_main.html
+@@ -56,16 +56,11 @@
+ 
+ <cr-view-manager id="switcher"
+     show-all$="[[shouldShowAll_(inSearchMode_, lastRoute_)]]">
+-  <template is="dom-if" if="[[showPage_(pageVisibility_.people)]]">
+-    <div slot="view" id="people">
+-      <template is="dom-if" if="[[renderPlugin_(
+-          routes_.PEOPLE, lastRoute_, inSearchMode_)]]">
+-        <settings-people-page-index prefs="{{prefs}}"
+-            in-search-mode="[[inSearchMode_]]">
+-        </settings-people-page-index>
+-      </template>
+-    </div>
+-  </template>
++  <!-- NOTE(colorburst fork): the "You and Google" people / sign-in-and-sync
++       page container is removed so settings-people-page-index is never added
++       to the DOM (and therefore never appears in Settings search results). The
++       matching menu item (settings_menu.html) and routes (route.ts) are also
++       removed. -->
+ 
+   <template is="dom-if" if="[[showPage_(pageVisibility_.privacy)]]">
+     <div slot="view" id="privacy">
+diff --git a/chrome/browser/resources/settings/settings_menu/settings_menu.html b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+index e47012903b..191d35311c 100644
+--- a/chrome/browser/resources/settings/settings_menu/settings_menu.html
++++ b/chrome/browser/resources/settings/settings_menu/settings_menu.html
+@@ -45,18 +45,9 @@
+       <cr-menu-selector id="menu" selectable="a:not(#extensionsLink)"
+           attr-for-selected="href" on-iron-activate="onSelectorActivate_"
+           on-click="onLinkClick_" selected-attribute="selected">
+-        <a role="menuitem"
+-            id="people" href="/people" hidden="[[!pageVisibility_.people]]"
+-            class="cr-nav-menu-item">
+-<if expr="not _google_chrome">
+-          <cr-icon icon="settings:person"></cr-icon>
+-</if>
+-<if expr="_google_chrome">
+-          <cr-icon icon="settings-internal:google-g"></cr-icon>
+-</if>
+-          $i18n{peoplePageTitle}
+-          <cr-ripple></cr-ripple>
+-        </a>
++        <!-- NOTE(colorburst fork): the "You and Google" (people / sign-in and
++             sync) menu item is removed. Its route is not registered (route.ts)
++             and its page container is removed (settings_main.html). -->
+         <a role="menuitem" id="autofill" href="/autofill"
+             on-click="onAutofillClick_"
+             class="cr-nav-menu-item"
+@@ -79,14 +70,9 @@
+           $i18n{performancePageTitle}
+           <cr-ripple></cr-ripple>
+         </a>
+-        <a role="menuitem" href="/ai"
+-            hidden="[[!showAiPageMenuItem_(showAiPage_, pageVisibility_.ai)]]"
+-            on-click="onAiPageClick_"
+-            class="cr-nav-menu-item">
+-          <cr-icon icon="settings20:button-magic"></cr-icon>
+-          $i18n{aiPageTitle}
+-          <cr-ripple></cr-ripple>
+-        </a>
++        <!-- NOTE(colorburst fork): the "AI in Chrome" menu item is removed. It
++             is additionally gated on `showAiPage`, which is hardcoded false in
++             settings_ui.cc, and its route is not registered (route.ts). -->
+         <a role="menuitem" id="appearance" href="/appearance"
+             hidden="[[!pageVisibility_.appearance]]"
+             class="cr-nav-menu-item">
+diff --git a/chrome/browser/ui/webui/settings/settings_ui.cc b/chrome/browser/ui/webui/settings/settings_ui.cc
+index e5b6d5c02b..90dd793fd8 100644
+--- a/chrome/browser/ui/webui/settings/settings_ui.cc
++++ b/chrome/browser/ui/webui/settings/settings_ui.cc
+@@ -639,9 +639,15 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
+   // Within the AI subpage are separate sections for Glic and for all other AI
+   // features, the visibility of these are separately controlled but we want to
+   // show the subpage if any of the AI features or Glic are enabled.
+-  html_source->AddBoolean("showAiPage", show_glic_section ||
+-                                            show_ai_features_section ||
+-                                            enable_ai_mode_search);
++  // NOTE(colorburst fork): the "AI in Chrome" settings surface is removed
++  // entirely. `showAiPage` is the single value that the route registration
++  // (route.ts), the left-nav menu item (settings_menu.html) and the page
++  // container (settings_main.html) all gate on, so hardcoding it false makes
++  // the whole section structurally absent regardless of which AI features,
++  // Glic/Gemini, or AI-mode-search flags happen to be enabled. Do not restore
++  // the upstream expression (show_glic_section || show_ai_features_section ||
++  // enable_ai_mode_search) -- a flag flip must not be able to bring it back.
++  html_source->AddBoolean("showAiPage", false);
+   html_source->AddBoolean("showAiPageAiFeatureSection",
+                           show_ai_features_section);
+ 
+@@ -876,9 +882,10 @@ void SettingsUI::UpdateShowGlicState() {
+   base::DictValue update;
+   update.Set("showGlicSettings", show_glic);
+   update.Set("glicDisallowedByAdmin", enablement.DisallowedByAdmin());
+-  if (show_glic) {
+-    update.Set("showAiPage", true);
+-  }
++  // NOTE(colorburst fork): upstream re-enabled `showAiPage` here whenever the
++  // Glic (Gemini) settings page became visible after the FRE, which would
++  // resurrect the "AI in Chrome" section at runtime. The section is removed in
++  // this build, so never flip `showAiPage` back on.
+ 
+   content::WebUIDataSource::Update(
+       web_ui()->GetWebContents()->GetBrowserContext(),
+-- 
+2.53.0
+

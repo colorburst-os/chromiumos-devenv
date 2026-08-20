@@ -1,0 +1,163 @@
+From 9834e3e1d86ac4528e5319b43cc0d2796806cf79 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 09:22:48 -0700
+Subject: [PATCH] Vietnamese IME: serve VNI and VIQR through the UniKey engine
+
+Only Telex was routed through the vendored UniKey engine; VNI and VIQR fell
+back to the stateless rule-based transliterator, so they missed word-level tone
+placement and non-Vietnamese-word restore. The m17n manifest already offers all
+three as selectable input methods (TCVN stays dropped, ime-tcvn-0001), and the
+rule-based mojo connection factory already routes any IsImeSupported() spec to
+UnikeyEngine, so wiring VNI/VIQR is a matter of accepting their specs and
+selecting the matching built-in typing convention:
+
+  - IsImeSupported() now also accepts "m17n:vi_vni" and "m17n:vi_viqr".
+  - The constructor maps the ime_spec to UkEngine's input method via a new
+    ImeSpecToInputMethod() (UkVni / UkViqr / UkTelex) and calls setIM() with it,
+    so switching the selected Vietnamese input method actually changes the
+    engine's key -> linguistic-event table. Default remains Telex.
+  - ApplySettings() now also consumes the VietnameseVniSettings union (flexible
+    diacritics, tone placement, underline, non-Vietnamese restore), so VNI's
+    os-settings toggles apply live on the same focus/options-changed seam as
+    Telex. VIQR has no settings union and runs on the shared defaults.
+
+The engine's other tables (MsVi, SimpleTelex, SimpleTelex2) are left
+unreachable: colorburst exposes no m17n layouts for them.
+
+Also flips the engine-side composition-underline default to off, matching the
+os-settings pref default (see the i18n/underline change) and telex-phase0.
+---
+ chromeos/ash/services/ime/unikey_engine.cc | 45 +++++++++++++++++++---
+ chromeos/ash/services/ime/unikey_engine.h  | 15 +++++---
+ 2 files changed, 49 insertions(+), 11 deletions(-)
+
+diff --git a/chromeos/ash/services/ime/unikey_engine.cc b/chromeos/ash/services/ime/unikey_engine.cc
+index c930868070..2868eb667c 100644
+--- a/chromeos/ash/services/ime/unikey_engine.cc
++++ b/chromeos/ash/services/ime/unikey_engine.cc
+@@ -22,6 +22,26 @@ namespace ime {
+ namespace {
+ 
+ constexpr char kTelexSpec[] = "m17n:vi_telex";
++constexpr char kVniSpec[] = "m17n:vi_vni";
++constexpr char kViqrSpec[] = "m17n:vi_viqr";
++
++// Maps a supported Vietnamese ime_spec to the vendored engine's built-in input
++// method (see third_party/unikey/keycons.h UkInputMethod). Telex, VNI and VIQR
++// are all real UniKey typing conventions; the engine's UkInputProcessor::setIM
++// swaps the key -> linguistic-event mapping table accordingly, so the same word
++// -level state machine (tone placement, non-Vietnamese restore, ...) serves all
++// three. TCVN was deliberately dropped (ime-tcvn-0001) and is not offered. The
++// engine also has MsVi/SimpleTelex/SimpleTelex2 tables, but colorburst exposes
++// no m17n layouts for them, so they are intentionally unreachable here.
++UkInputMethod ImeSpecToInputMethod(const std::string& ime_spec) {
++  if (ime_spec == kVniSpec) {
++    return UkVni;
++  }
++  if (ime_spec == kViqrSpec) {
++    return UkViqr;
++  }
++  return UkTelex;
++}
+ 
+ // Maps a physical key (US QWERTY) to its base and shifted ASCII characters.
+ // Returns 0 for keys the engine has no interest in. Only the subset Telex
+@@ -110,7 +130,8 @@ void AppendUtf8(const unsigned char* b, int n, std::vector<uint32_t>* out) {
+ 
+ // static
+ bool UnikeyEngine::IsImeSupported(const std::string& ime_spec) {
+-  return ime_spec == kTelexSpec;
++  return ime_spec == kTelexSpec || ime_spec == kVniSpec ||
++         ime_spec == kViqrSpec;
+ }
+ 
+ // static
+@@ -141,7 +162,8 @@ UnikeyEngine::UnikeyEngine(
+   mem_->vietKey = true;
+   mem_->usrKeyMapLoaded = false;
+   mem_->charsetId = CONV_CHARSET_XUTF8;
+-  mem_->input.setIM(UkTelex);
++  // Select the built-in typing convention (Telex / VNI / VIQR) for this layout.
++  mem_->input.setIM(ImeSpecToInputMethod(ime_spec));
+   ApplySettings(settings);
+ 
+   engine_->setCtrlInfo(mem_.get());
+@@ -158,11 +180,13 @@ UnikeyEngine::~UnikeyEngine() = default;
+ 
+ void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings) {
+   // Defaults mirror the os-settings pref defaults (see input_method_settings.cc
+-  // CreateVietnameseTelexSettings): flexible diacritics on, classic tone
+-  // placement, underline shown.
++  // CreateVietnamese{Telex,Vni}Settings): flexible diacritics on, classic tone
++  // placement, underline hidden (colorburst default: no composition underline,
++  // matching the extension-path behavior from telex-phase0), non-Vietnamese
++  // restore on. These also cover VIQR, which has no settings union of its own.
+   bool flexible = true;
+   bool modern = false;
+-  bool underline = true;
++  bool underline = false;
+   bool w_for_u_horn = false;  // default off — bare 'w' stays a literal 'w'
+   bool restore_non_vn = true;  // default on — invalid VN words keep their keys
+   if (settings && settings->is_vietnamese_telex_settings()) {
+@@ -174,6 +198,17 @@ void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings)
+     restore_non_vn = s.enable_restore_non_vietnamese_words;
+     // enable_insert_double_horn_on_uo is a property of the Telex definition in
+     // UkEngine (processHook) and is applied unconditionally.
++  } else if (settings && settings->is_vietnamese_vni_settings()) {
++    // VNI shares every runtime knob with Telex except the w-for-u-horn shortcut
++    // (a Telex-only key convention). Now that VNI is served by this engine (not
++    // the stateless rule-based tables), its os-settings toggles apply live too.
++    const auto& s = *settings->get_vietnamese_vni_settings();
++    flexible = s.allow_flexible_diacritics;
++    modern = s.new_style_tone_mark_placement;
++    underline = s.show_underline_for_composition_text;
++    restore_non_vn = s.enable_restore_non_vietnamese_words;
++    // enable_insert_double_horn_on_uo (uo7 -> ươ) is native to the VNI
++    // definition in UkEngine and applied unconditionally.
+   }
+ 
+   // allow_flexible_diacritics ("free marking"): tone/diacritic keys may be
+diff --git a/chromeos/ash/services/ime/unikey_engine.h b/chromeos/ash/services/ime/unikey_engine.h
+index f4237096b5..67e994cf4a 100644
+--- a/chromeos/ash/services/ime/unikey_engine.h
++++ b/chromeos/ash/services/ime/unikey_engine.h
+@@ -2,9 +2,9 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-// colorburst PoC: a mojom::InputMethod backed by the vendored LGPL UniKey
+-// engine (//third_party/unikey), selected for the Vietnamese Telex layout in
+-// place of the stateless rule-based transliterator. See
++// colorburst: a mojom::InputMethod backed by the vendored LGPL UniKey engine
++// (//third_party/unikey), selected for the Vietnamese Telex, VNI and VIQR
++// layouts in place of the stateless rule-based transliterator. See
+ // internal-knowledge/VIETNAMESE-IME-PERF.md.
+ 
+ #ifndef CHROMEOS_ASH_SERVICES_IME_UNIKEY_ENGINE_H_
+@@ -40,7 +40,8 @@ class UnikeyEngine : public mojom::InputMethod {
+       mojo::PendingAssociatedRemote<mojom::InputMethodHost> host,
+       const mojom::InputMethodSettingsPtr& settings);
+ 
+-  // Whether `ime_spec` is one this engine handles (m17n:vi_telex today).
++  // Whether `ime_spec` is one this engine handles (the Vietnamese Telex, VNI
++  // and VIQR m17n layouts).
+   static bool IsImeSupported(const std::string& ime_spec);
+ 
+   UnikeyEngine(const UnikeyEngine&) = delete;
+@@ -98,8 +99,10 @@ class UnikeyEngine : public mojom::InputMethod {
+   std::vector<uint32_t> composition_;
+ 
+   // Whether the composition preedit is shown underlined (the
+-  // show_underline_for_composition_text Telex pref).
+-  bool show_underline_ = true;
++  // show_underline_for_composition_text Telex/VNI pref). colorburst default off:
++  // Vietnamese composes a syllable at a time so an underline sits under nearly
++  // everything typed, and Windows UniKey draws none (see telex-phase0).
++  bool show_underline_ = false;
+ };
+ 
+ }  // namespace ime
+-- 
+2.53.0
+

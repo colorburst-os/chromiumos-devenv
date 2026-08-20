@@ -113,4 +113,19 @@ am telex-settings-ui-0001-options-page.patch
 am telex-nonvn-restore-0001.patch
 am ime-tcvn-0001-drop-option.patch
 
+# Complete the Vietnamese options-page translations and default the composition
+# underline OFF (native UnikeyEngine path); then add VNI + VIQR as selectable
+# input methods routed through the same engine (Telex stays default, TCVN stays
+# dropped). These edit input_method_settings.cc / unikey_engine.{cc,h} /
+# input_method_prefs_defaults.ts on top of the telex-settings + telex-w-toggle
+# patches, so they must follow them.
+am telex-i18n-underline-0001.patch
+am ime-vni-and-methods-0001.patch
+
+# De-Google the browser Settings surface: remove the "AI in Chrome" page
+# (compile-time off + menu/route/container gone) and the "You and Google"
+# (people/sync) section for every profile. Touches only browser-settings files
+# no other patch edits; generated at full-series HEAD, so it applies last.
+am degoogle-0006-remove-ai-and-you-and-google.patch
+
 echo "OK. All colorburst patches applied. Now rebuild chrome (ash-chrome)."
