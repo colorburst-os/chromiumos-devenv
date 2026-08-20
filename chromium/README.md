@@ -116,6 +116,30 @@ The image lands in
 `chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin`
 (also hardlinked as `colorburst-<version>.bin`).
 
+## One command for a clean release build
+
+The steps above (fetch → apply-all → bootstrap → build-image) give you a **test**
+image for VM iteration. To cut the **release** image a version is actually
+shipped and OTA-signed from, use the one-shot instead:
+
+```bash
+chromium/rebuild-release.sh
+```
+
+It is deterministic on purpose — the resulting image depends on the committed
+tree, not on who (or what) runs it, so "run it and watch it finish" is the whole
+job. In order it: hard-resets the Chromium checkout to the pinned base and
+re-applies the full series; re-applies the platform2 and chromite patches
+(idempotent); **nukes** the board build cache (keeps the host SDK and
+distfiles); runs `bootstrap-board.sh` (a fatal-on-error `build-packages` that
+compiles our patched Chrome — a Chrome compile failure now aborts the whole run
+instead of silently falling through to a stale/remote Chrome); runs
+`build-release.sh` (console-less kernel, devtools-off BSP, patched
+`update_engine`, then a verity `cros build-image base`, then an in-place
+debugfs verify); and finally `gen-payload.sh` to stage the unsigned OTA payload
+under `chromiumos/ota-release/<version>/`. It does **not** sign (that needs the
+YubiKey) and does **not** push. 2–4 h cold.
+
 ## The fast loop
 
 A cold Chrome build is hours; iterating is not. Edit, then:

@@ -23,27 +23,53 @@ and the notes behind every decision.
 | `chromium-patches/` | The ~25-patch series that makes Chromium into colorburst's Chrome, plus the rule-based IME and UniKey payloads. Applied in order by `chromium-patches/apply-all.sh` — see [chromium/README.md](chromium/README.md) |
 | `tools/` | `vm-instance.sh` (isolated VMs), `cdp.py` (drive Chrome over DevTools), `guest-type.py` (type on a real keyboard device in the guest), `pak.py`, `local-account-walk.sh` |
 
-## Quick start
+## Quick start — from nothing to a VM, end to end
+
+Five steps, in order. On a cold machine budget **one long build (2–4 h)** plus a
+big first-time source sync; after that, rebuilds are minutes. Everything runs in
+containers — the only thing on your host is Docker.
+
+**Before you start (once):** Docker + KVM (`/dev/kvm` must exist), ~200 GB free
+disk, and membership in the private `colorburst-os` GitHub org with the `gh`
+credential helper set up (`gh auth setup-git`) — the source sync pulls two forks
+over HTTPS. See RUNNING-VM.md §1 for the exact host setup.
 
 ```bash
-# 0. Sync the ChromiumOS tree (see "Reproducing the checkout" below) and fetch
-#    the Chromium source + apply the patch series (see chromium/README.md).
+# 1. Assemble the pinned ChromiumOS tree into chromiumos/  (one-time, ~176 GB).
+#    Full recipe under "Reproducing the checkout" below.
 
-# 1. Bootstrap the board sysroot ONCE per checkout: setup_board + a full
-#    build-packages. The first cros_sdk call here also creates the SDK chroot,
-#    so this step is slow (hours) the first time. build-image.sh assumes it.
-chromium/bootstrap-board.sh
+# 2. Fetch the pinned Chromium base and apply the colorburst patch series.
+#    (Details + the full patch list: chromium/README.md.)
+chromium/fetch.sh                                    # ~30 GB, pinned base 831a446cd4
+git -C ../chromium-src/src checkout -b colorburst 831a446cd4
+chromium-patches/apply-all.sh ../chromium-src/src    # applies the whole series, in order
 
-# 2. Build. This builds our patched Chrome, then the BSP package, then an image.
-# 2-3 h cold, ~10 min warm.  NEVER plain `cros build-packages`: it force-fetches
-# Chrome from the binhost and throws our patches away. See chromium/README.md.
-chromium/build-image.sh
+# 3. Build — ONE command, no decisions. This is the deterministic clean build:
+#    it normalises every patch tree, nukes the board cache, bootstraps the board
+#    (setup_board + build-packages, which compiles OUR patched Chrome), builds
+#    the verity release image, and stages the unsigned OTA payload. Just run it
+#    and wait (2–4 h cold). Signing the payload is a separate maintainer step.
+chromium/rebuild-release.sh
 
-# 3. Run (see RUNNING-VM.md for the from-scratch guide)
-./run-crosvm.sh   # crosvm, GPU window + network; CROS_VM_SCSI defaults on for colorburst
+# 4. Run it in a VM — a window on your desktop in ~60 s. Full copy-paste guide:
+#    RUNNING-VM.md.  (CROS_VM_SCSI=1 is required for colorburst images.)
+CROS_VM_SCSI=1 ./run-crosvm.sh \
+    chromiumos/src/build/images/colorburst/latest/colorburst-*-release.bin
 ```
 
 All VMs: `ssh -p 9222 root@localhost`, password `test0000`.
+
+**Two kinds of build — pick by what you're doing:**
+
+| You want… | Run | Produces |
+|---|---|---|
+| The shippable, OTA-signable image (what releases are cut from) | `chromium/rebuild-release.sh` | verity **release** image + unsigned payload under `chromiumos/ota-release/<ver>/` |
+| Fast day-to-day iteration in a VM (SSH-able, writable, no signing) | `chromium/bootstrap-board.sh` once, then `chromium/build-image.sh` | **test** image at `…/images/colorburst/latest/chromiumos_test_image.bin` |
+
+`rebuild-release.sh` is the "even a dumb agent just runs this and watches it
+finish" path: it is fully deterministic — the image depends on the committed
+tree, not on who drives it. **Never** run plain `cros build-packages`: it
+force-fetches Chrome from the binhost and throws our patches away.
 
 ## Running several VMs at once
 
