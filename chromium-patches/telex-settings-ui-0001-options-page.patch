@@ -1,0 +1,92 @@
+From 9651bc0c6f3a5d427a4514bd8a206679874ed510 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 02:58:04 -0700
+Subject: [PATCH] Vietnamese IME: show the os-settings options page on
+ unbranded builds
+
+The Vietnamese Telex/VNI options subpage (and its gear affordance in
+Settings -> Inputs) never appeared on colorburst: the toggles were plumbed end
+to end (input_method_settings.ts maps vkd_vi_telex/vkd_vi_vni to the
+VIETNAMESE_*_SETTINGS sections, the engine honors the prefs), but the UI gate
+that decides whether to render an options page was keyed on the branded
+component-extension id only.
+
+hasOptionsPageInSettings() -> isFirstPartyInputMethodId() tested the installed
+input-method id against a single hardcoded prefix,
+"_comp_ime_jkghodnilhceideoidjikpgommlajknk" (the branded input-methods
+extension). On unbranded ChromiumOS/colorburst builds the m17n rule-based
+layouts live in a different extension (kM17nExtensionId ==
+"jhffeifommiaekmbkkjlpmilogcfdohp", see ui/base/ime/ash/extension_ime_util.h),
+so the Vietnamese id is "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_telex".
+That never matched the branded prefix, so isFirstPartyInputMethodId() returned
+false, hasOptionsPageInSettings() returned false, and input_page.html rendered
+no gear / no subpage. getFirstPartyInputMethodEngineId() would also have
+assert-failed had the page ever been reached.
+
+This is the UI-side twin of the m17n: vs vkd_ mismatch fixed engine-side in
+"Vietnamese IME: deliver Telex settings live on the mojo rule-based path".
+
+Recognize the unbranded m17n extension prefix in addition to the branded one,
+and strip whichever prefix matched when deriving the engine id. No behavior
+change on branded builds (both extension ids collapse to the single branded id
+there).
+
+---
+ .../os_languages_page/input_method_util.ts    | 31 +++++++++++++++++--
+ 1 file changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts
+index d5f5a46949..15f34e27ef 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts
+@@ -20,6 +20,29 @@ import {getInputMethodSettings, SettingsType} from './input_method_settings.js';
+ export const FIRST_PARTY_INPUT_METHOD_ID_PREFIX =
+     '_comp_ime_jkghodnilhceideoidjikpgommlajknk';
+ 
++/**
++ * colorburst: on unbranded ChromiumOS builds the m17n rule-based layouts
++ * (vkd_*, including the Vietnamese vkd_vi_telex / vkd_vi_vni) are hosted by a
++ * separate component extension (kM17nExtensionId ==
++ * "jhffeifommiaekmbkkjlpmilogcfdohp", see ui/base/ime/ash/extension_ime_util.h)
++ * rather than the single branded input-methods extension above. Their installed
++ * id therefore carries a different prefix, so isFirstPartyInputMethodId()
++ * rejected them and the os-settings options page / gear never rendered for the
++ * Vietnamese IME even though its settings sections exist. Recognize this prefix
++ * too so hasOptionsPageInSettings() and getFirstPartyInputMethodEngineId() work
++ * for the Vietnamese input methods. See internal-knowledge/VIETNAMESE-IME-PERF.md.
++ */
++const M17N_INPUT_METHOD_ID_PREFIX =
++    '_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohp';
++
++/**
++ * All component-extension id prefixes treated as first party in os-settings.
++ */
++const FIRST_PARTY_INPUT_METHOD_ID_PREFIXES = [
++  FIRST_PARTY_INPUT_METHOD_ID_PREFIX,
++  M17N_INPUT_METHOD_ID_PREFIX,
++];
++
+ /**
+  * UI-only items (not backed by CrOS-Prefs) on option pages. These typically
+  * correspond to action buttons or links in CrOS Settings UI.
+@@ -303,7 +326,11 @@ const Settings = {
+ export function getFirstPartyInputMethodEngineId(id: string): string {
+   // Safety: Enforced by documentation.
+   assert(isFirstPartyInputMethodId(id));
+-  return id.substring(FIRST_PARTY_INPUT_METHOD_ID_PREFIX.length);
++  // Strip whichever first-party prefix matched (branded input-methods extension
++  // or the unbranded m17n extension) so vkd_vi_telex/vkd_vi_vni resolve too.
++  const prefix =
++      FIRST_PARTY_INPUT_METHOD_ID_PREFIXES.find((p) => id.startsWith(p))!;
++  return id.substring(prefix.length);
+ }
+ 
+ /**
+@@ -909,5 +936,5 @@ export function getSubmenuButtonType(option: OptionType|UiOptionType):
+  * @return true if |id| is a first party input method ID.
+  */
+ function isFirstPartyInputMethodId(id: string): boolean {
+-  return id.startsWith(FIRST_PARTY_INPUT_METHOD_ID_PREFIX);
++  return FIRST_PARTY_INPUT_METHOD_ID_PREFIXES.some((p) => id.startsWith(p));
+ }

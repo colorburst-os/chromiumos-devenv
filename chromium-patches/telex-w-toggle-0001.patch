@@ -33,8 +33,6 @@ toggle in os-settings with the field still focused (no refocus, no reconnect):
   flipped OFF:    w->w, uw->ư, windows->windows
 Regression battery unchanged: 23/23 oracle-match, 6 expected divergences, 0 fails.
 
-
-
 ---
  .../ash/input_method/input_method_settings.cc |  5 ++-
  .../input_method_prefs_defaults.ts            |  5 ++-

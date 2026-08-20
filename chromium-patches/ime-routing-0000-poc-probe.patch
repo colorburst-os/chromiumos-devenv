@@ -31,8 +31,6 @@ LOG(ERROR) lines removed after use.
 VERIFIED clean compile of ime:lib and the input_method target. VM instance 2
 (owner imepoc) released; 0/1 untouched.
 
-
-
 ---
  .../native_input_method_engine_observer.cc     | 18 +++++++++++++++++-
  1 file changed, 17 insertions(+), 1 deletion(-)

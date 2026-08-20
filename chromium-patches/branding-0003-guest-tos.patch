@@ -20,8 +20,6 @@ is a deliberate product choice; making it literally true means standing up a
 metrics receiver and pointing IDS_METRICS_SERVER_URL at it, the way the OTA
 server was built.
 
-
-
 ---
  ash/login/resources/ash_login_strings.grd                 | 2 +-
  ash/login/resources/translations/ash_login_strings_vi.xtb | 2 +-

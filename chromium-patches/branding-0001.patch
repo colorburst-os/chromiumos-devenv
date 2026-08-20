@@ -34,8 +34,6 @@ connection needed."
 Verified on a booted image: welcome, install-or-try and account screens all
 read colorburst / máy tính, with the bars in place of the G.
 
-
-
 ---
  ash/ash_strings.grd                           |  2 +-
  ash/login/resources/ash_login_strings.grd     |  8 +++----

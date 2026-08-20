@@ -27,8 +27,6 @@ selection needs the signal.
 Verified on a VM: 16 Telex sequences produce what a typist expects, and the
 composition draws with no underline.
 
-
-
 ---
 
 diff --git a/chrome/browser/ash/input_method/input_method_engine.cc b/chrome/browser/ash/input_method/input_method_engine.cc

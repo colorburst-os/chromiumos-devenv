@@ -66,7 +66,16 @@ am startpage-0001.patch
 am degoogle-0003-discover.patch
 am localaccount-vi-strings.patch
 am degoogle-0004-no-enroll.patch
+am degoogle-0005-translate-no-autopop.patch
 am localaccount-official-defaults.patch
+# Vietnamese locale defaults (independent single-file edits; no other patch
+# touches components_locale_settings_vi.xtb or spellcheck_factory.cc, so their
+# position here is not load-bearing):
+#   * drop French from the default Accept-Language list (vi,en-US,en).
+#   * enable the en-US Hunspell dictionary alongside vi so English words are not
+#     wrongly flagged as misspelled in a Vietnamese-primary session.
+am localaccount-accept-languages-no-fr.patch
+am spellcheck-enable-en-us.patch
 am branding-0002-install-colorburst.patch
 
 # 7. Atomic password factor. `git am` fails ("could not build fake ancestor" -
@@ -90,6 +99,18 @@ am telex-settings-0001.patch
 am branding-0003-guest-tos.patch
 am ime-orca-crash-0001.patch
 am telex-w-toggle-0001.patch
+# UI twin of telex-settings-0001: let os-settings render the Vietnamese options
+# page for the unbranded m17n extension id (vkd_vi_* under kM17nExtensionId), so
+# the Telex/VNI toggles are actually reachable in Settings. Touches only
+# input_method_util.ts, which no other patch edits, so its position is not
+# load-bearing.
+am telex-settings-ui-0001-options-page.patch
+# New "restore non-Vietnamese words" Telex/VNI toggle. The UnikeyEngine already
+# restored the original keystrokes for invalid Vietnamese words unconditionally
+# (spellCheckEnabled + autoNonVnRestore); this exposes it as an os-settings
+# option plumbed through the mojom settings union, default on. Depends on the
+# options page being reachable (telex-settings-ui-0001), so it follows it.
+am telex-nonvn-restore-0001.patch
 am ime-tcvn-0001-drop-option.patch
 
 echo "OK. All colorburst patches applied. Now rebuild chrome (ash-chrome)."

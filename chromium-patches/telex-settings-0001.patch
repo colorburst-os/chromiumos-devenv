@@ -38,8 +38,6 @@ active in a textarea, hoaf -> "hoa-grave"; flip new-style in os-settings with th
 field still focused (no refocus, no reconnect) and hoaf -> "hoa-modern"; flip
 back and it returns to "hoa-grave".
 
-
-
 ---
  .../ash/input_method/input_method_settings.cc | 28 ++++++++-
  .../native_input_method_engine_observer.cc    | 53 +++++++++++++++-

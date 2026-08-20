@@ -1,0 +1,61 @@
+From 0e0ee8c9637007dc00a8c6e7bdac2e795c1d5aa3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 16 Aug 2026 09:10:00 -0700
+Subject: [PATCH] Translate: keep the omnibox icon, kill the auto-popping
+ bubble
+
+The full-page Translate bubble auto-offering to translate foreign-language
+pages is both annoying and a de-Google concern (the offer round-trips page
+language to Google's translate infrastructure and nags on every visit). Kill
+only the automatic offer while keeping the manual entry point intact.
+
+The automatic "offer to translate this page" path routes through
+TranslateManager::MaterializeDecision, which calls the client's
+ShowTranslateUI() with the BEFORE_TRANSLATE step and triggered_from_menu ==
+false. An explicit user gesture never reaches this method: clicking the
+omnibox page-action icon dispatches IDC_SHOW_TRANSLATE, whose command handler
+calls BrowserWindow::ShowTranslateBubble() directly with is_user_gesture ==
+true. So suppressing BEFORE_TRANSLATE + !triggered_from_menu in
+ChromeTranslateClient::ShowTranslateUI removes exactly the auto-pop and
+nothing else.
+
+The omnibox icon is unaffected: it is driven by
+LanguageState::translate_enabled(), which TranslateManager::MaybeShowOmniboxIcon
+sets unconditionally (translate_manager.cc) and which
+TranslatePageActionController observes to show/hide the page action. That path
+never consults the bubble, so the icon still lights up on translatable pages
+and the user can click it to translate manually.
+---
+ .../browser/translate/chrome_translate_client.cc  | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/chrome/browser/translate/chrome_translate_client.cc b/chrome/browser/translate/chrome_translate_client.cc
+index 146610bc1c..7df49f2c63 100644
+--- a/chrome/browser/translate/chrome_translate_client.cc
++++ b/chrome/browser/translate/chrome_translate_client.cc
+@@ -343,6 +343,21 @@ bool ChromeTranslateClient::ShowTranslateUI(
+ #else
+   DCHECK(TranslateService::IsTranslateBubbleEnabled());
+   // Bubble UI.
++  // NOTE(colorburst fork): never let the full-page translate bubble pop up on
++  // its own. The automatic "offer to translate this page" path (see
++  // TranslateManager::MaterializeDecision) reaches here with the
++  // BEFORE_TRANSLATE step and triggered_from_menu==false; suppress it so the
++  // bubble only ever opens from an explicit user gesture -- the omnibox
++  // page-action icon routes through browser_commands' ShowTranslateBubble()
++  // with is_user_gesture==true and never enters this method, and menu-driven
++  // translation arrives with triggered_from_menu==true. The omnibox icon
++  // itself is driven separately by LanguageState::translate_enabled() (set in
++  // TranslateManager::MaybeShowOmniboxIcon) via TranslatePageActionController,
++  // so it still lights up on translatable pages for manual use.
++  if (step == translate::TRANSLATE_STEP_BEFORE_TRANSLATE &&
++      !triggered_from_menu) {
++    return false;
++  }
+   if (step == translate::TRANSLATE_STEP_BEFORE_TRANSLATE &&
+       translate_manager_->ShouldSuppressBubbleUI(target_language)) {
+     return false;
+-- 
+2.53.0
+

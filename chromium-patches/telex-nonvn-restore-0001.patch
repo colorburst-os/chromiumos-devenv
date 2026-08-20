@@ -1,0 +1,364 @@
+From 4b852c79804e4f4ea1d1f89889e45f78902537bf Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 03:09:47 -0700
+Subject: [PATCH] Vietnamese IME: add a "restore non-Vietnamese words"
+ Telex/VNI option
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The vendored UniKey engine already restores the original keystrokes when a typed
+word is not valid Vietnamese (so "worldcup" stays "worldcup" instead of becoming
+"wỏldcup"), but it was hardcoded on in unikey_engine.cc:
+
+  mem_->options.spellCheckEnabled = 1;   // detects the invalid word
+  mem_->options.autoNonVnRestore = 1;    // restores the keystrokes
+
+Expose it as a user-visible toggle, plumbed live on the same focus /
+options-changed seam as the other Telex settings (telex-settings-0001):
+
+- input_method.mojom: new enable_restore_non_vietnamese_words field on both
+  VietnameseTelexSettings (@5) and VietnameseVniSettings (@4), MinVersion=26.
+- input_method_settings.cc/.h: new pref keys
+  vietnameseTelexEnableNonVnRestore / vietnameseVniEnableNonVnRestore, read into
+  the settings union (default ON) with matching UMA.
+- unikey_engine.cc ApplySettings: drive spellCheckEnabled + autoNonVnRestore
+  from the pref (was hardcoded 1); default on so mixed English/Vietnamese typing
+  "just works".
+- os-settings front end (input_method_util.ts, prefs_consts/defaults.ts,
+  options_page.ts): new VIETNAMESE_*_ENABLE_NON_VN_RESTORE toggle in its own
+  section of the Telex and VNI options pages, default on.
+- os_settings_strings.grdp + inputs_section.cc: label "Restore non-Vietnamese
+  words" and its description.
+
+Default: ON. Chosen so a user typing mixed English/Vietnamese gets English words
+left intact without touching settings; turning it off makes the engine always
+apply Vietnamese diacritics.
+
+Scope note: the UnikeyEngine only serves Telex (kTelexSpec == "m17n:vi_telex");
+VNI is served by the rule-based engine, which discards runtime settings. The VNI
+toggle is added for parity and flows through the mojom union, but is currently
+inert on the VNI path — exactly like the pre-existing VNI toggles.
+
+---
+ chrome/app/os_settings_strings.grdp           |  6 ++++++
+ .../ash/input_method/input_method_settings.cc | 20 ++++++++++++++++++
+ .../input_method_settings_consts.h            |  6 ++++++
+ .../input_method_options_page.ts              |  1 +
+ .../input_method_prefs_consts.ts              |  2 ++
+ .../input_method_prefs_defaults.ts            |  6 ++++++
+ .../os_languages_page/input_method_util.ts    | 21 +++++++++++++++++++
+ .../settings/pages/device/inputs_section.cc   |  4 ++++
+ .../ime/public/mojom/input_method.mojom       | 17 +++++++++++++--
+ chromeos/ash/services/ime/unikey_engine.cc    | 11 ++++++++--
+ 10 files changed, 90 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/app/os_settings_strings.grdp b/chrome/app/os_settings_strings.grdp
+index 755979c6f6..51cf59413a 100644
+--- a/chrome/app/os_settings_strings.grdp
++++ b/chrome/app/os_settings_strings.grdp
+@@ -922,6 +922,12 @@
+   <message name="IDS_SETTINGS_INPUT_METHOD_OPTIONS_VIETNAMESE_TELEX_W_SHORTCUT" desc="This is a label for the settings option to enable a shortcut way of typing in the Vietnamese Telex input method whereby typing the key W gives the character Ư directly, without having to type the canonical U-W. Note that the character is U-with-horn.">
+    Type "w" to get "ư"
+   </message>
++  <message name="IDS_SETTINGS_INPUT_METHOD_OPTIONS_VIETNAMESE_RESTORE_NON_VIETNAMESE" desc="This is a label for the settings option that makes the Vietnamese input method leave non-Vietnamese words alone: when the typed word is not valid Vietnamese, the original keystrokes are kept instead of turning them into accented letters. For example, typing the English word 'worldcup' stays 'worldcup' rather than becoming an accented form.">
++   Restore non-Vietnamese words
++  </message>
++  <message name="IDS_SETTINGS_INPUT_METHOD_OPTIONS_DESCRIPTION_VIETNAMESE_RESTORE_NON_VIETNAMESE" desc="This is a description for the settings option that makes the Vietnamese input method leave non-Vietnamese words alone. It explains that words which are not valid Vietnamese keep their original keystrokes, giving an English word as an example.">
++   Keep the original keys for words that aren't valid Vietnamese (e.g. "worldcup")
++  </message>
+ 
+   <!-- Device Page (OS Settings) -->
+   <message name="IDS_OS_SETTINGS_TOUCHPAD_REVERSE_SCROLL_LABEL">
+diff --git a/chrome/browser/ash/input_method/input_method_settings.cc b/chrome/browser/ash/input_method/input_method_settings.cc
+index 4ae13e932a..5a00630cff 100644
+--- a/chrome/browser/ash/input_method/input_method_settings.cc
++++ b/chrome/browser/ash/input_method/input_method_settings.cc
+@@ -101,6 +101,9 @@ void RecordSettingsMetrics(const mojom::VietnameseTelexSettings& settings) {
+   base::UmaHistogramBoolean(
+       "InputMethod.PhysicalKeyboard.VietnameseTelex.ShowUnderline",
+       settings.show_underline_for_composition_text);
++  base::UmaHistogramBoolean(
++      "InputMethod.PhysicalKeyboard.VietnameseTelex.RestoreNonVietnamese",
++      settings.enable_restore_non_vietnamese_words);
+ }
+ 
+ void RecordSettingsMetrics(const mojom::VietnameseVniSettings& settings) {
+@@ -116,6 +119,9 @@ void RecordSettingsMetrics(const mojom::VietnameseVniSettings& settings) {
+   base::UmaHistogramBoolean(
+       "InputMethod.PhysicalKeyboard.VietnameseVNI.ShowUnderline",
+       settings.show_underline_for_composition_text);
++  base::UmaHistogramBoolean(
++      "InputMethod.PhysicalKeyboard.VietnameseVNI.RestoreNonVietnamese",
++      settings.enable_restore_non_vietnamese_words);
+ }
+ 
+ mojom::VietnameseVniSettingsPtr CreateVietnameseVniSettings(
+@@ -133,6 +139,12 @@ mojom::VietnameseVniSettingsPtr CreateVietnameseVniSettings(
+   settings->show_underline_for_composition_text =
+       input_method_specific_pref.FindBool(kVnPrefVniShowUnderline)
+           .value_or(true);
++  // colorburst: default ON so mixed English/Vietnamese typing "just works"
++  // (invalid Vietnamese words keep their original keystrokes). Carried for
++  // parity with Telex; VNI is rule-based and does not honor it at runtime.
++  settings->enable_restore_non_vietnamese_words =
++      input_method_specific_pref.FindBool(kVnPrefVniEnableNonVnRestore)
++          .value_or(true);
+   RecordSettingsMetrics(*settings);
+   return settings;
+ }
+@@ -158,6 +170,14 @@ mojom::VietnameseTelexSettingsPtr CreateVietnameseTelexSettings(
+   settings->show_underline_for_composition_text =
+       input_method_specific_pref.FindBool(kVnPrefTelexShowUnderline)
+           .value_or(true);
++  // colorburst: default ON so mixed English/Vietnamese typing "just works":
++  // when a typed word is not valid Vietnamese, the engine restores the original
++  // keystrokes instead of applying diacritics (e.g. "worldcup" stays
++  // "worldcup"). The engine honors this via UnikeyOptions.spellCheckEnabled +
++  // autoNonVnRestore.
++  settings->enable_restore_non_vietnamese_words =
++      input_method_specific_pref.FindBool(kVnPrefTelexEnableNonVnRestore)
++          .value_or(true);
+   RecordSettingsMetrics(*settings);
+   return settings;
+ }
+diff --git a/chrome/browser/ash/input_method/input_method_settings_consts.h b/chrome/browser/ash/input_method/input_method_settings_consts.h
+index 1923e62039..bd78c0fae5 100644
+--- a/chrome/browser/ash/input_method/input_method_settings_consts.h
++++ b/chrome/browser/ash/input_method/input_method_settings_consts.h
+@@ -92,6 +92,9 @@ inline constexpr std::string_view kVnPrefVniInsertDoubleHornOnUo =
+     "vietnameseVniInsertDoubleHornOnUo";
+ inline constexpr std::string_view kVnPrefVniShowUnderline =
+     "vietnameseVniShowUnderline";
++// colorburst: restore original keystrokes for non-Vietnamese words.
++inline constexpr std::string_view kVnPrefVniEnableNonVnRestore =
++    "vietnameseVniEnableNonVnRestore";
+ inline constexpr std::string_view kVnPrefTelexAllowFlexibleDiacritics =
+     "vietnameseTelexAllowFlexibleDiacritics";
+ inline constexpr std::string_view kVnPrefTelexNewStyleToneMarkPlacement =
+@@ -102,6 +105,9 @@ inline constexpr std::string_view kVnPrefTelexInsertUHornOnW =
+     "vietnameseTelexInsertUHornOnW";
+ inline constexpr std::string_view kVnPrefTelexShowUnderline =
+     "vietnameseTelexShowUnderline";
++// colorburst: restore original keystrokes for non-Vietnamese words.
++inline constexpr std::string_view kVnPrefTelexEnableNonVnRestore =
++    "vietnameseTelexEnableNonVnRestore";
+ 
+ // Options values for the above option categories:
+ // LINT.IfChange(JpOptionValues)
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_options_page.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_options_page.ts
+index da9c26edb5..bcdb0f6900 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_options_page.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_options_page.ts
+@@ -500,6 +500,7 @@ export class SettingsInputMethodOptionsPageElement extends
+         return this.i18n('inputMethodOptionsVietnameseShorthandTypingTitle');
+       case SettingsHeaders.VIETNAMESE_FLEXIBLE_TYPING_EMPTY_HEADER:
+       case SettingsHeaders.VIETNAMESE_SHOW_UNDERLINE_EMPTY_HEADER:
++      case SettingsHeaders.VIETNAMESE_SPELL_CHECK_EMPTY_HEADER:
+         return '';
+       default:
+         assertExhaustive(section);
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_consts.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_consts.ts
+index 8141da0f2c..7a9beda4da 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_consts.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_consts.ts
+@@ -78,6 +78,7 @@ export enum OptionType {
+       'vietnameseVniNewStyleToneMarkPlacement',
+   VIETNAMESE_VNI_INSERT_DOUBLE_HORN_ON_UO = 'vietnameseVniInsertDoubleHornOnUo',
+   VIETNAMESE_VNI_SHOW_UNDERLINE = 'vietnameseVniShowUnderline',
++  VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE = 'vietnameseVniEnableNonVnRestore',
+   VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS =
+       'vietnameseTelexAllowFlexibleDiacritics',
+   VIETNAMESE_TELEX_NEW_STYLE_TONE_MARK_PLACEMENT =
+@@ -86,6 +87,7 @@ export enum OptionType {
+       'vietnameseTelexInsertDoubleHornOnUo',
+   VIETNAMESE_TELEX_INSERT_U_HORN_ON_W = 'vietnameseTelexInsertUHornOnW',
+   VIETNAMESE_TELEX_SHOW_UNDERLINE = 'vietnameseTelexShowUnderline',
++  VIETNAMESE_TELEX_ENABLE_NON_VN_RESTORE = 'vietnameseTelexEnableNonVnRestore',
+ }
+ 
+ /**
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
+index c5d741b64d..729c96f29f 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_prefs_defaults.ts
+@@ -65,6 +65,8 @@ export const OPTION_DEFAULT = {
+   [OptionType.VIETNAMESE_VNI_NEW_STYLE_TONE_MARK_PLACEMENT]: false,
+   [OptionType.VIETNAMESE_VNI_INSERT_DOUBLE_HORN_ON_UO]: false,
+   [OptionType.VIETNAMESE_VNI_SHOW_UNDERLINE]: true,
++  // colorburst: default ON so mixed English/Vietnamese typing "just works".
++  [OptionType.VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE]: true,
+   [OptionType.VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS]: true,
+   [OptionType.VIETNAMESE_TELEX_NEW_STYLE_TONE_MARK_PLACEMENT]: false,
+   [OptionType.VIETNAMESE_TELEX_INSERT_DOUBLE_HORN_ON_UO]: false,
+@@ -73,4 +75,8 @@ export const OPTION_DEFAULT = {
+   // because it mangles English w-words). See VIETNAMESE-IME-PERF.md.
+   [OptionType.VIETNAMESE_TELEX_INSERT_U_HORN_ON_W]: false,
+   [OptionType.VIETNAMESE_TELEX_SHOW_UNDERLINE]: true,
++  // colorburst: default ON so mixed English/Vietnamese typing "just works"
++  // (invalid Vietnamese words keep their original keystrokes). Matches the pref
++  // default in input_method_settings.cc.
++  [OptionType.VIETNAMESE_TELEX_ENABLE_NON_VN_RESTORE]: true,
+ } satisfies Partial<Record<OptionType, unknown>>;
+diff --git a/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts b/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts
+index 15f34e27ef..3b30dd94f9 100644
+--- a/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts
++++ b/chrome/browser/resources/ash/settings/os_languages_page/input_method_util.ts
+@@ -118,6 +118,7 @@ export enum SettingsHeaders {
+       'vietnameseFlexibleTypingEmptyHeader',
+   VIETNAMESE_SHORTHAND = 'vietnameseShorthand',
+   VIETNAMESE_SHOW_UNDERLINE_EMPTY_HEADER = 'vietnameseShowUnderlineEmptyHeader',
++  VIETNAMESE_SPELL_CHECK_EMPTY_HEADER = 'vietnameseSpellCheckEmptyHeader',
+ }
+ 
+ /**
+@@ -279,6 +280,12 @@ const Settings = {
+         {name: OptionType.VIETNAMESE_TELEX_INSERT_U_HORN_ON_W},
+       ],
+     },
++    {
++      title: SettingsHeaders.VIETNAMESE_SPELL_CHECK_EMPTY_HEADER,
++      optionNames: [
++        {name: OptionType.VIETNAMESE_TELEX_ENABLE_NON_VN_RESTORE},
++      ],
++    },
+     {
+       title: SettingsHeaders.VIETNAMESE_SHOW_UNDERLINE_EMPTY_HEADER,
+       optionNames: [
+@@ -304,6 +311,12 @@ const Settings = {
+         {name: OptionType.VIETNAMESE_VNI_INSERT_DOUBLE_HORN_ON_UO},
+       ],
+     },
++    {
++      title: SettingsHeaders.VIETNAMESE_SPELL_CHECK_EMPTY_HEADER,
++      optionNames: [
++        {name: OptionType.VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE},
++      ],
++    },
+     {
+       title: SettingsHeaders.VIETNAMESE_SHOW_UNDERLINE_EMPTY_HEADER,
+       optionNames: [
+@@ -436,6 +449,8 @@ export function getOptionUiType(option: OptionType|UiOptionType): UiType {
+     case OptionType.VIETNAMESE_VNI_NEW_STYLE_TONE_MARK_PLACEMENT:
+     case OptionType.VIETNAMESE_VNI_INSERT_DOUBLE_HORN_ON_UO:
+     case OptionType.VIETNAMESE_VNI_SHOW_UNDERLINE:
++    case OptionType.VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE:
++    case OptionType.VIETNAMESE_TELEX_ENABLE_NON_VN_RESTORE:
+     case OptionType.VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS:
+     case OptionType.VIETNAMESE_TELEX_NEW_STYLE_TONE_MARK_PLACEMENT:
+     case OptionType.VIETNAMESE_TELEX_INSERT_DOUBLE_HORN_ON_UO:
+@@ -583,6 +598,9 @@ export function getOptionLabelName(option: OptionType|UiOptionType): string {
+       return 'inputMethodOptionsVietnameseVniUoHookShortcut';
+     case OptionType.VIETNAMESE_VNI_SHOW_UNDERLINE:
+       return 'inputMethodOptionsVietnameseShowUnderline';
++    case OptionType.VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE:
++    case OptionType.VIETNAMESE_TELEX_ENABLE_NON_VN_RESTORE:
++      return 'inputMethodOptionsVietnameseRestoreNonVietnamese';
+     case OptionType.VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS:
+       return 'inputMethodOptionsVietnameseFlexibleTyping';
+     case OptionType.VIETNAMESE_TELEX_NEW_STYLE_TONE_MARK_PLACEMENT:
+@@ -623,6 +641,9 @@ export function getOptionSubtitleName(option: OptionType|UiOptionType): string {
+     case OptionType.VIETNAMESE_TELEX_SHOW_UNDERLINE:
+     case OptionType.VIETNAMESE_VNI_SHOW_UNDERLINE:
+       return 'inputMethodOptionsVietnameseShowUnderlineDescription';
++    case OptionType.VIETNAMESE_TELEX_ENABLE_NON_VN_RESTORE:
++    case OptionType.VIETNAMESE_VNI_ENABLE_NON_VN_RESTORE:
++      return 'inputMethodOptionsVietnameseRestoreNonVietnameseDescription';
+     case OptionType.VIETNAMESE_TELEX_ALLOW_FLEXIBLE_DIACRITICS:
+       return 'inputMethodOptionsVietnameseTelexFlexibleTypingDescription';
+     case OptionType.VIETNAMESE_VNI_ALLOW_FLEXIBLE_DIACRITICS:
+diff --git a/chrome/browser/ui/webui/ash/settings/pages/device/inputs_section.cc b/chrome/browser/ui/webui/ash/settings/pages/device/inputs_section.cc
+index f3b882500d..6ea1e9a170 100644
+--- a/chrome/browser/ui/webui/ash/settings/pages/device/inputs_section.cc
++++ b/chrome/browser/ui/webui/ash/settings/pages/device/inputs_section.cc
+@@ -281,6 +281,10 @@ void AddInputMethodOptionsLoadTimeData(
+        IDS_SETTINGS_INPUT_METHOD_OPTIONS_VIETNAMESE_SHOW_UNDERLINE},
+       {"inputMethodOptionsVietnameseShowUnderlineDescription",
+        IDS_SETTINGS_INPUT_METHOD_OPTIONS_DESCRIPTION_VIETNAMESE_SHOW_UNDERLINE},
++      {"inputMethodOptionsVietnameseRestoreNonVietnamese",
++       IDS_SETTINGS_INPUT_METHOD_OPTIONS_VIETNAMESE_RESTORE_NON_VIETNAMESE},
++      {"inputMethodOptionsVietnameseRestoreNonVietnameseDescription",
++       IDS_SETTINGS_INPUT_METHOD_OPTIONS_DESCRIPTION_VIETNAMESE_RESTORE_NON_VIETNAMESE},
+   };
+   html_source->AddLocalizedStrings(kLocalizedStrings);
+   html_source->AddBoolean("isPhysicalKeyboardAutocorrectAllowed",
+diff --git a/chromeos/ash/services/ime/public/mojom/input_method.mojom b/chromeos/ash/services/ime/public/mojom/input_method.mojom
+index 009b11745a..d883622d64 100644
+--- a/chromeos/ash/services/ime/public/mojom/input_method.mojom
++++ b/chromeos/ash/services/ime/public/mojom/input_method.mojom
+@@ -721,7 +721,7 @@ interface InputMethod {
+ 
+ // Settings for Vietnamese Telex input method.
+ //
+-// Next ordinal: 5
++// Next ordinal: 6
+ [Stable]
+ struct VietnameseTelexSettings {
+   // Allow flexible diacritic assignment.
+@@ -739,11 +739,17 @@ struct VietnameseTelexSettings {
+ 
+   // Show an underline for the text under composition mode.
+   [MinVersion=20] bool show_underline_for_composition_text@4;
++
++  // colorburst: when a typed word is not valid Vietnamese, restore the original
++  // keystrokes instead of applying diacritics (so "worldcup" stays "worldcup"
++  // rather than "wỏldcup"). Backed by the UnikeyOptions spellCheckEnabled +
++  // autoNonVnRestore fields in the vendored ukengine.
++  [MinVersion=26] bool enable_restore_non_vietnamese_words@5;
+ };
+ 
+ // Settings for Vietnamese VNI input method.
+ //
+-// Next ordinal: 4
++// Next ordinal: 5
+ [Stable]
+ struct VietnameseVniSettings {
+   // Allow flexible diacritic assignment.
+@@ -758,4 +764,11 @@ struct VietnameseVniSettings {
+ 
+   // Show an underline for the text under composition mode.
+   [MinVersion=20] bool show_underline_for_composition_text@3;
++
++  // colorburst: when a typed word is not valid Vietnamese, restore the original
++  // keystrokes instead of applying diacritics. Note: VNI is served by the
++  // rule-based engine, which does not honor runtime settings, so this field is
++  // carried for parity with Telex but is currently inert on the VNI path (the
++  // same is true of the other VNI settings above).
++  [MinVersion=26] bool enable_restore_non_vietnamese_words@4;
+ };
+diff --git a/chromeos/ash/services/ime/unikey_engine.cc b/chromeos/ash/services/ime/unikey_engine.cc
+index 2d62a68a35..c930868070 100644
+--- a/chromeos/ash/services/ime/unikey_engine.cc
++++ b/chromeos/ash/services/ime/unikey_engine.cc
+@@ -164,12 +164,14 @@ void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings)
+   bool modern = false;
+   bool underline = true;
+   bool w_for_u_horn = false;  // default off — bare 'w' stays a literal 'w'
++  bool restore_non_vn = true;  // default on — invalid VN words keep their keys
+   if (settings && settings->is_vietnamese_telex_settings()) {
+     const auto& s = *settings->get_vietnamese_telex_settings();
+     flexible = s.allow_flexible_diacritics;
+     modern = s.new_style_tone_mark_placement;
+     underline = s.show_underline_for_composition_text;
+     w_for_u_horn = s.enable_w_for_u_horn_shortcut;
++    restore_non_vn = s.enable_restore_non_vietnamese_words;
+     // enable_insert_double_horn_on_uo is a property of the Telex definition in
+     // UkEngine (processHook) and is applied unconditionally.
+   }
+@@ -184,8 +186,13 @@ void UnikeyEngine::ApplySettings(const mojom::InputMethodSettingsPtr& settings)
+   // uw/aw/ow are unaffected either way (they hook a real vowel). Default off.
+   mem_->options.bareWToUHorn = w_for_u_horn ? 1 : 0;
+   mem_->options.macroEnabled = 0;
+-  mem_->options.spellCheckEnabled = 1;   // needed for the D4 restore logic
+-  mem_->options.autoNonVnRestore = 1;    // D4: restore non-Vietnamese words
++  // enable_restore_non_vietnamese_words: when a typed word is not valid
++  // Vietnamese, restore the original keystrokes instead of applying diacritics
++  // (e.g. "worldcup" stays "worldcup"). Both fields gate the D4 restore logic:
++  // spellCheckEnabled detects the invalid word, autoNonVnRestore performs the
++  // key restore (UkEngine::processAppend / lastWordIsNonVn). Default on.
++  mem_->options.spellCheckEnabled = restore_non_vn ? 1 : 0;
++  mem_->options.autoNonVnRestore = restore_non_vn ? 1 : 0;
+   mem_->options.strictSpellCheck = 0;
+   mem_->options.useUnicodeClipboard = 0;
+   mem_->options.alwaysMacro = 0;

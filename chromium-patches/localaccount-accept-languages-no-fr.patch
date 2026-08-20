@@ -1,0 +1,37 @@
+From 8ffa475ead95676fc5cb6d7a1a92306d42b49db0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 03:20:32 -0700
+Subject: [PATCH] Vietnamese default Accept-Language: drop French (vi,en-US,en)
+
+On a fresh Vietnamese profile, chrome://settings languages and the
+intl.accept_languages pref defaulted to Vietnamese, French, English
+(US), English. The French entry is seeded entirely by the vi
+translation of IDS_ACCEPT_LANGUAGES (the HTTP Accept-Language default),
+which upstream Chromium ships as "vi-VN,vi,fr-FR,fr,en-US,en" in
+components/strings/components_locale_settings_vi.xtb -- a historical
+Google-translations artifact, not anything colorburst added.
+
+Drop the fr-FR,fr pair so the colorburst default is Vietnamese, English
+(US), English, matching a de-Googled Vietnamese target audience that
+does not want French preloaded.
+
+---
+ components/strings/components_locale_settings_vi.xtb | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/components/strings/components_locale_settings_vi.xtb b/components/strings/components_locale_settings_vi.xtb
+index c5a5db3db1..dc7febcd72 100644
+--- a/components/strings/components_locale_settings_vi.xtb
++++ b/components/strings/components_locale_settings_vi.xtb
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" ?>
+ <!DOCTYPE translationbundle>
+ <translationbundle lang="vi">
+-<translation id="IDS_ACCEPT_LANGUAGES">vi-VN,vi,fr-FR,fr,en-US,en</translation>
++<translation id="IDS_ACCEPT_LANGUAGES">vi-VN,vi,en-US,en</translation>
+ <translation id="IDS_DEFAULT_ENCODING">windows-1258</translation>
+ </translationbundle>
+-- 
+2.53.0
+

@@ -39,8 +39,6 @@ whose point is that it does not talk to Google, hiding the icon is not
 enough, so the WebUI registration is dropped too and the host no longer
 exists.
 
-
-
 ---
  .../resources/mock/js/app_main.ts             | 759 +++++++++++++-----
  .../apps/mall_system_web_app_info.cc          |  20 +-

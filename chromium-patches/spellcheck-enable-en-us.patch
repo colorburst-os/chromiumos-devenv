@@ -1,0 +1,67 @@
+From b0c0d38f169183a461d86e6f5ecbd69a4f143673 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 20 Aug 2026 03:20:33 -0700
+Subject: [PATCH] Spellcheck: enable en-US alongside the UI-locale dictionary
+
+On colorburst the red spellcheck squiggle appeared under correctly
+spelled English words while Vietnamese was fine. Root cause: a fresh
+Vietnamese profile enables exactly one Hunspell dictionary. Upstream
+registers spellcheck.dictionaries as an empty list, and
+SpellcheckService's constructor migrates the empty list to
+[IDS_SPELLCHECK_DICTIONARY], which for the vi locale is "vi" -> the
+real vi-VN-3-0.bdic dictionary. English text is then checked only
+against Vietnamese; SpellCheck::SpellCheckWord returns IS_CORRECT for a
+word only when some enabled language accepts it, so every English word
+is flagged. This is not a missing/de-Googled dictionary: vi-VN loads on
+device (that is what flags English), fetched on demand from the same
+CDN that would serve en-US, and enhanced spellcheck stays off.
+
+Seed spellcheck.dictionaries with a non-empty default containing both
+the UI-locale dictionary and en-US. A non-empty default also
+short-circuits the empty-list migration, so it sticks. Vietnamese stays
+correct via vi-VN, English words now pass via en-US-10-1.bdic (fetched
+on demand exactly like vi-VN, no image bundling needed).
+
+---
+ .../spellchecker/spellcheck_factory.cc        | 24 ++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/spellchecker/spellcheck_factory.cc b/chrome/browser/spellchecker/spellcheck_factory.cc
+index 4ac5a96d0d..032c5d048a 100644
+--- a/chrome/browser/spellchecker/spellcheck_factory.cc
++++ b/chrome/browser/spellchecker/spellcheck_factory.cc
+@@ -55,7 +55,29 @@ SpellcheckServiceFactory::BuildServiceInstanceForBrowserContext(
+ 
+ void SpellcheckServiceFactory::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* user_prefs) {
+-  user_prefs->RegisterListPref(spellcheck::prefs::kSpellCheckDictionaries);
++  // NOTE(colorburst fork): seed the enabled Hunspell dictionaries with both
++  // the UI-locale dictionary (IDS_SPELLCHECK_DICTIONARY, "vi" for a Vietnamese
++  // session) and English "en-US". A colorburst profile is Vietnamese-primary,
++  // so upstream seeds only "vi" (SpellcheckService migrates the empty list to
++  // [IDS_SPELLCHECK_DICTIONARY]); English words then get checked solely against
++  // vi-VN and are wrongly flagged as misspelled, because
++  // SpellCheck::SpellCheckWord only returns IS_CORRECT when some enabled
++  // language accepts the word. Enabling en-US as well keeps Vietnamese correct
++  // (vi-VN) and stops the false English squiggles. en-US-10-1.bdic is fetched
++  // on demand exactly like vi-VN-3-0.bdic, so no image bundling is required.
++  // Registering a non-empty default also short-circuits the empty-list
++  // migration in SpellcheckService's constructor, so this default sticks.
++  base::Value::List default_dictionaries;
++  const std::string ui_dictionary =
++      l10n_util::GetStringUTF8(IDS_SPELLCHECK_DICTIONARY);
++  if (!ui_dictionary.empty()) {
++    default_dictionaries.Append(ui_dictionary);
++  }
++  if (ui_dictionary != "en-US") {
++    default_dictionaries.Append("en-US");
++  }
++  user_prefs->RegisterListPref(spellcheck::prefs::kSpellCheckDictionaries,
++                               std::move(default_dictionaries));
+   user_prefs->RegisterListPref(
+       spellcheck::prefs::kSpellCheckForcedDictionaries);
+   user_prefs->RegisterListPref(
+-- 
+2.53.0
+

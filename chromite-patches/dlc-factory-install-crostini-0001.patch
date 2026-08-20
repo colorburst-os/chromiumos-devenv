@@ -1,0 +1,38 @@
+colorburst: factory-install Crostini DLCs (termina, termina-tools, edk2-ovmf).
+
+Add the three DLC IDs Crostini needs to chromite's factory-install allowlist so
+their overlay-colorburst ebuilds (which set DLC_FACTORY_INSTALL=true) are
+accepted. Without this, build_dlc dies with "DLC=<id> is not allowed to be
+factory installed" at both ebuild build time (EbuildParams.VerifyDlcParameters)
+and image build time (dlc_lib.IsFactoryInstallAllowed). Factory-installing bakes
+each dlc.img into the release image's stateful unencrypted/dlc-factory-images/
+area so dlcservice installs Crostini's termina VM from local storage, never
+contacting the colorburst update server (which serves only the OS payload, not
+DLCs). See overlay-colorburst/chromeos-base/{termina-dlc,termina-tools-dlc,
+edk2-ovmf-dlc}.
+
+--- a/lib/dlc_allowlist.py
++++ b/lib/dlc_allowlist.py
+@@ -14,7 +14,21 @@
+ 
+ # Add DLC ID that requires factory installation.
+ # By default, factory installed DLCs are allowed to be powerwash safe.
+-DLC_FACTORY_INSTALL = (r"sample-dlc",)
++#
++# colorburst: termina-dlc, termina-tools-dlc and edk2-ovmf-dlc are
++# factory-installed into the release image (their overlay-colorburst ebuilds set
++# DLC_FACTORY_INSTALL=true) so the "Linux development environment" (Crostini)
++# installs entirely from local storage. The colorburst update server serves only
++# the OS payload, not DLCs, so the upstream OTA delivery path for these DLCs can
++# never succeed on our fleet. This allowlist is enforced both at ebuild build
++# time (EbuildParams.VerifyDlcParameters) and at image build time
++# (dlc_lib.IsFactoryInstallAllowed), so all three IDs must be listed here.
++DLC_FACTORY_INSTALL = (
++    r"sample-dlc",
++    r"termina-dlc",
++    r"termina-tools-dlc",
++    r"edk2-ovmf-dlc",
++)
+ 
+ # Add DLC ID that requires factory installation with regex matching.
+ # By default, factory installed DLCs are allowed to be powerwash safe.

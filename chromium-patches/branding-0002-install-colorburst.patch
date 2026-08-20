@@ -18,8 +18,6 @@ with the in-tree grit, same as the earlier local-account vi strings):
 Other locales fall back to the English string rather than showing the
 stale Flex name.
 
-
-
 ---
  chromeos/chromeos_strings.grd            | 6 ++++--
  chromeos/strings/chromeos_strings_vi.xtb | 2 +-

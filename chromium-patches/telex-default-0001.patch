@@ -24,8 +24,6 @@ Verified: a fresh local account now preloads vkd_vi_telex, and typing
 "tieengs Vieejt ddaay nguwowfi" on a hardware keyboard gives
 "tiếng Việt đây người".
 
-
-
 ---
  ui/base/ime/ash/input_method_util.cc | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)

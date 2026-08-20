@@ -28,8 +28,6 @@ GOOGLE_API_KEY / GOOGLE_DEFAULT_CLIENT_ID / GOOGLE_DEFAULT_CLIENT_SECRET
 --allow-failed-policy-fetch-for-test, --disable-policy-key-verification,
 --cros-region=vn.
 
-
-
 ---
  chrome/BUILD.gn                    |  4 ++
  chrome/app/BUILD.gn                |  4 ++
