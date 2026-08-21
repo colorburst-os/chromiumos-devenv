@@ -48,9 +48,26 @@ sign_hash() { # sign_hash <hash.bin> <out.sig> <label>
     { printf '%s' "$DIGESTINFO" | xxd -r -p; cat "$hash"; } > "$tmp"
     echo
     echo ">>> Signing ${label}. TOUCH the YubiKey when it blinks (PIN already entered)."
-    pkcs11-tool --module "$MODULE" --login "${PIN_ARGS[@]}" \
+    # Back-to-back pkcs11-tool processes can hit a stale token state on the
+    # second run (C_Login: CKR_OPERATION_NOT_INITIALIZED) when the PIN is fed
+    # with --pin. Retry once after letting pcscd settle; if it still fails,
+    # fall back to pkcs11-tool's own interactive PIN prompt for this signature
+    # (worst case: the PIN is typed once more) instead of aborting the run.
+    if ! pkcs11-tool --module "$MODULE" --login "${PIN_ARGS[@]}" \
         --sign --mechanism RSA-PKCS --id "$KEYID" \
-        --input-file "$tmp" --output-file "$out"
+        --input-file "$tmp" --output-file "$out"; then
+        echo ">>> retrying ${label} after a token reset pause..." >&2
+        sleep 3
+        pkcs11-tool --module "$MODULE" --list-slots >/dev/null 2>&1 || true
+        if ! pkcs11-tool --module "$MODULE" --login "${PIN_ARGS[@]}" \
+            --sign --mechanism RSA-PKCS --id "$KEYID" \
+            --input-file "$tmp" --output-file "$out"; then
+            echo ">>> --pin path failed twice; falling back to an interactive PIN prompt for ${label}." >&2
+            pkcs11-tool --module "$MODULE" --login \
+                --sign --mechanism RSA-PKCS --id "$KEYID" \
+                --input-file "$tmp" --output-file "$out"
+        fi
+    fi
     rm -f "$tmp"
     # Independent check against the public key before going anywhere near
     # the payload: exactly the verification update_engine will perform.
