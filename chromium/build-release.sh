@@ -91,6 +91,17 @@ cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/update_engine 2>/de
 cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/update_engine
 [ \$? -eq 0 ] || exit 1
 
+# regions, likewise from this checkout's platform2 tree: it carries the patch
+# dropping m17n:vi_tcvn from region vn. That entry MUST match the input methods
+# colorburst's Chrome actually ships -- OOBE looks up a descriptor for every
+# hardware input method of the device region and NOTREACHED()s on a miss, which
+# is fatal, so a stale cros-regions.json here means Chrome SIGTRAPs on every
+# first boot and no fresh install can finish setup. Rebuilt explicitly because
+# this script does not run a full build-packages.
+cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/regions 2>/dev/null
+cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/regions
+[ \$? -eq 0 ] || exit 1
+
 # The base image, verity on. Same USE so image-build dependency resolution
 # matches the binpkgs we just made.
 cros_sdk --chrome-root=/chromium -- env \
@@ -148,6 +159,38 @@ CDC=$(dbg /etc/chrome_dev.conf)
 # dm-verity: the grub/syslinux configs should point the kernel at dm-verity
 # roots (boot target 'verified', dm= present).
 dbg /boot/efi/boot/grub.cfg | grep -q 'dm='; check "dm-verity cmdline present" $?
+# Every hardware input method of region vn must still exist as an input method
+# colorburst ships. OOBE resolves each one and NOTREACHED()s -- fatally -- on a
+# miss, so a mismatch here is not cosmetic: Chrome SIGTRAPs on first boot and NO
+# fresh install can complete setup, while already-provisioned devices updating
+# over OTA never notice because they skip OOBE. That is exactly how 2026.32.9
+# shipped broken (region vn still listed m17n:vi_tcvn after the TCVN input
+# method was dropped from m17n_manifest.json).
+# The region list comes out of the built image; the set of input methods Chrome
+# ships comes from the patched Chromium source (m17n_manifest.json is compiled
+# into resources.pak, so it cannot be read back out of the image).
+REGIONS_JSON=$(dbg /usr/share/misc/cros-regions.json)
+python3 - "$REGIONS_JSON" \
+    "$CHROME/src/chrome/browser/resources/chromeos/input_method/m17n_manifest.json" <<'PYEOF'
+import json, sys
+try:
+    kbds = json.loads(sys.argv[1])["vn"]["keyboards"]
+except Exception as e:
+    print(f"    could not read region vn from the image: {e}"); sys.exit(1)
+try:
+    manifest = json.load(open(sys.argv[2]))
+except Exception as e:
+    print(f"    could not read {sys.argv[2]}: {e}"); sys.exit(1)
+have = {c["id"] for c in manifest.get("input_components", [])}
+missing = [k for k in kbds
+           if k.startswith("m17n:") and "vkd_" + k.split(":", 1)[1] not in have]
+if missing:
+    print(f"    region vn wants {missing}, but colorburst's Chrome ships only "
+          f"{sorted(i for i in have if i.startswith('vkd_vi'))}")
+    sys.exit(1)
+sys.exit(0)
+PYEOF
+check "region vn input methods all exist (OOBE would crash otherwise)" $?
 # Kernel built without VT consoles.
 KNAME=$(debugfs -c -R "ls /boot" "$IMG?offset=$OFF" 2>/dev/null |
         tr -s ' \n' '\n\n' | grep '^config-' | head -1)

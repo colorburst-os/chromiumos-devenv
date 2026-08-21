@@ -1,0 +1,27 @@
+diff --git a/regions/regions.py b/regions/regions.py
+index 36eadd8592..0c8f27bb09 100755
+--- a/regions/regions.py
++++ b/regions/regions.py
+@@ -652,11 +652,21 @@ REGIONS_LIST = [
+     Region(
+         "vn",
+         [
++            # colorburst: "m17n:vi_tcvn" is deliberately absent. colorburst's
++            # Chrome drops the TCVN input method from m17n_manifest.json, so no
++            # descriptor exists for that id. OOBE walks THIS list --
++            # GetAndActivateOobeInputMethods -> GetInputMethodDescriptorFromId
++            # (chrome/browser/ui/webui/ash/login/l10n_util.cc) -- and hits
++            # NOTREACHED() on the null descriptor, which is fatal in current
++            # Chromium despite the "Do not crash in case of misconfiguration"
++            # comment sitting right beside it. Chrome died with SIGTRAP on every
++            # first boot, so no fresh install could finish OOBE; devices already
++            # set up never noticed, because OTA skips OOBE entirely.
++            # If TCVN is ever restored to the manifest, restore it here too.
+             "xkb:us::eng",
+             "m17n:vi_telex",
+             "m17n:vi_vni",
+             "m17n:vi_viqr",
+-            "m17n:vi_tcvn",
+         ],
+         "Asia/Ho_Chi_Minh",
+         ["vi", "en-GB", "en-US", "fr", "zh-TW"],
