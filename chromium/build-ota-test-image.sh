@@ -3,11 +3,11 @@
 # update_engine, used to verify end-to-end OTA against the live server in a
 # VM. See release/verify-vm-update.sh for the harness that consumes it.
 #
-#   chromium/build-ota-test-image.sh [minor]     # default: RELEASE-MINOR
+#   chromium/build-ota-test-image.sh [version]   # default: the tree's RELEASE
 #
 # What it shares with a real release image (chromium/build-release.sh):
 #   - CHROMEOS_AUSERVER baked as https://update.colorburst.net/update and
-#     CHROMEOS_RELEASE_VERSION = <year>.<week/4*4>.<minor>, via the same
+#     CHROMEOS_RELEASE_VERSION = the tree's files/RELEASE, via the same
 #     chromeos_version.sh rewrite. The wire behavior of update_engine
 #     (server, appid, reported version) is identical.
 #   - The payload public key at /usr/share/update_engine/
@@ -37,10 +37,8 @@ export BOARD="${BOARD:-colorburst}"
 
 AUSERVER='https://update.colorburst.net/update'
 
-MINOR="${1:-$(cat "$DEVENV/chromiumos/src/overlays/overlay-${BOARD}/chromeos-base/chromeos-bsp-${BOARD}/files/RELEASE-MINOR")}"
-WEEK=$(( 10#$(date +%V) / 4 * 4 ))
-YEAR=$(date +%G)
-REL="${YEAR}.${WEEK}.${MINOR}"
+REL="${1:-$(release_version)}"                 # frozen in the tree, not the clock
+YEAR="${REL%%.*}"; WEEK="$(echo "$REL" | cut -d. -f2)"; MINOR="${REL##*.}"
 
 VERSION_FILE="$DEVENV/chromiumos/src/third_party/chromiumos-overlay/chromeos/config/chromeos_version.sh"
 cp "$VERSION_FILE" "$VERSION_FILE.dev-backup"

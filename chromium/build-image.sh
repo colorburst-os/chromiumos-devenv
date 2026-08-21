@@ -72,13 +72,11 @@ cros_sdk --chrome-root=/chromium -- env \
 IMAGE_RC=\$?; echo IMAGE_RC=\$IMAGE_RC
 [ \$IMAGE_RC -eq 0 ] || exit \$IMAGE_RC
 
-# Release naming: colorburst-<year>.<week floored to /4>.<minor>.bin, the
-# same scheme the BSP stamps into /etc/os-release VERSION (R-prefixed
-# there). Minor comes from the overlay's RELEASE-MINOR so the image name
-# and the OS's own idea of its version cannot drift.
-MINOR=\$(cat src/overlays/overlay-${BOARD}/chromeos-base/chromeos-bsp-${BOARD}/files/RELEASE-MINOR 2>/dev/null || echo 0)
-WEEK=\$(( 10#\$(date +%V) / 4 * 4 ))
-REL=\$(date +%G).\${WEEK}.\${MINOR}
+# Release naming: colorburst-<version>.bin, read from the SAME files/RELEASE
+# the BSP stamps into /etc/os-release VERSION (R-prefixed there), so the image
+# name and the OS's own idea of its version cannot drift. The version is a
+# property of the commit and is never recomputed from the build clock.
+REL=\$(tr -d '[:space:]' < src/overlays/overlay-${BOARD}/chromeos-base/chromeos-bsp-${BOARD}/files/RELEASE 2>/dev/null || echo 0.0.0)
 IMGDIR=\$(readlink -f src/build/images/${BOARD}/latest)
 ln -f \"\$IMGDIR/chromiumos_test_image.bin\" \"\$IMGDIR/colorburst-\${REL}.bin\"
 echo \"RELEASE R\${REL}: \$IMGDIR/colorburst-\${REL}.bin\"

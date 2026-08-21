@@ -84,9 +84,7 @@ log "stage unsigned OTA payload for signing"
 release/gen-payload.sh
 
 # --- done -------------------------------------------------------------------
-MINOR="$(cat "chromiumos/src/overlays/overlay-${BOARD}/chromeos-base/chromeos-bsp-${BOARD}/files/RELEASE-MINOR")"
-WEEK=$(( 10#$(date +%V) / 4 * 4 ))
-REL="$(date +%G).${WEEK}.${MINOR}"
+REL="$(release_version)"
 log "DONE -- release ${REL}"
 echo "Unsigned payload staged under chromiumos/ota-release/${REL}/"
 echo "Next (maintainer, needs the YubiKey):"

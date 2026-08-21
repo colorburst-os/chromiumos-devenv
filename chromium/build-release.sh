@@ -51,10 +51,8 @@ AUSERVER='https://update.colorburst.net/update'
 # name a host we own instead.
 DEVSERVER='https://devserver.colorburst.net'
 
-MINOR=$(cat "$DEVENV/chromiumos/src/overlays/overlay-${BOARD}/chromeos-base/chromeos-bsp-${BOARD}/files/RELEASE-MINOR")
-WEEK=$(( 10#$(date +%V) / 4 * 4 ))
-YEAR=$(date +%G)
-REL="${YEAR}.${WEEK}.${MINOR}"
+REL="$(release_version)"                       # frozen in the tree, not the clock
+YEAR="${REL%%.*}"; WEEK="$(echo "$REL" | cut -d. -f2)"; MINOR="${REL##*.}"
 
 # --- version mapping: colorburst release number -> CHROMEOS_RELEASE_VERSION
 VERSION_FILE="$DEVENV/chromiumos/src/third_party/chromiumos-overlay/chromeos/config/chromeos_version.sh"

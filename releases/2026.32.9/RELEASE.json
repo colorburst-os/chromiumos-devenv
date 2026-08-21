@@ -1,0 +1,60 @@
+{
+  "version": "2026.32.9",
+  "cut_date": "2026-08-20",
+  "channels": [
+    "canary-channel",
+    "dev-channel",
+    "beta-channel",
+    "stable"
+  ],
+  "chrome_milestone": "153",
+  "note": "Recorded retroactively on 2026-08-21 from the unmodified build tree. This is the last release whose version string was derived from the build clock; from 2026.33.0 on the version is frozen in the tree (files/RELEASE) and is a property of the commit.",
+  "source": {
+    "chromium_os": {
+      "repo": "colorburst-os/chromiumos-devenv",
+      "commit": "5bb0010",
+      "note": "the commit HEAD was at during the 2026-08-20 build; recorded retroactively, so BUILD-ID in the image says the pre-freeze value"
+    },
+    "chromium": {
+      "pinned_base": "831a446cd4",
+      "patches": "chromium-patches/apply-all.sh at the commit above"
+    },
+    "manifest": {
+      "file": "manifest.xml",
+      "note": "repo manifest -r: every project at an exact SHA"
+    },
+    "forks": {
+      "board-overlays": "65d314ab6252d1e92c680bde61cce6dd97226fb1",
+      "crosvm": "d1dd56403fb897955c54f2827aa4e5851db1f1e5"
+    }
+  },
+  "artifacts": {
+    "image": {
+      "name": "colorburst-2026.32.9-release.bin",
+      "sha256": "55a1134c29fde4e6156c1ed32c3af6f42bd3c8c11f4ea2305d866e007c3e91b7",
+      "size": 6973121024
+    },
+    "image_xz": {
+      "name": "colorburst-2026.32.9.bin.xz",
+      "sha256": "3463c60db3ae8ae704f5814bbbd274c357ee17068ace0520b33e996116f14ac0",
+      "size": 812790228
+    },
+    "ota_payload": {
+      "name": "colorburst-2026.32.9-full-signed.bin",
+      "sha256": "3dec63777ea60ad808e252d3ea8a29aa17bab3d11b71cbb6493eaa11a9d2cfbd",
+      "size": 742573973,
+      "metadata_size": 65955,
+      "is_delta": false
+    }
+  },
+  "signing": {
+    "key": "update-payload-key.pub.pem",
+    "spki_sha256": "32f2443560b51232b91d5d08f39c74b8870aaf442147c5c08a2337bc4edc41ba",
+    "slot": "YubiKey PIV 9C"
+  },
+  "highlights": [
+    "Crostini works: force-ota DLCs fetched from dl.colorburst.net instead of Google's hardcoded CDN",
+    "Settings de-Googled further: 'AI in Chrome' and 'You and Google' removed",
+    "Vietnamese IME: VNI + VIQR routed through UniKey, composition underline off by default"
+  ]
+}

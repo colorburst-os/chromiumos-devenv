@@ -48,3 +48,22 @@ in_container() { # in_container <name> <command...>
         -v /dev:/dev "$DOCKER_IMAGE" \
         bash -lc "$*"
 }
+
+# --- release version --------------------------------------------------------
+# THE version of the tree, read verbatim from the BSP's files/RELEASE. It is a
+# property of the commit, never of the build clock: the same commit must always
+# produce the same version string, or a shipped release cannot be rebuilt.
+# (Through 2026.32.9 this was computed as <year>.<week/4*4>.<minor> from `date`
+# at build time, in five separate places -- so the same tree built a week later
+# produced a different version. See releases/README.md.)
+#
+# Shape: <year>.<series>.<patch>
+#   year   - year the series opened
+#   series - development cycle, the ISO week it opened; bumped deliberately
+#   patch  - +1 per SHIPPED build within the series, never reused
+# Bump it with release/cut.sh, which also tags and records the manifest.
+release_version() {
+    local f="$DEVENV/chromiumos/src/overlays/overlay-${BOARD}/chromeos-base/chromeos-bsp-${BOARD}/files/RELEASE"
+    [ -f "$f" ] || { echo "no $f -- the tree has no version (see releases/README.md)" >&2; return 1; }
+    tr -d '[:space:]' < "$f"
+}
