@@ -91,3 +91,7 @@ log "DONE -- release ${REL}"
 echo "Unsigned payload staged under chromiumos/ota-release/${REL}/"
 echo "Next (maintainer, needs the YubiKey):"
 echo "    release/sign-on-yubikey.sh chromiumos/ota-release/${REL}"
+echo
+echo "Crostini DLCs (no YubiKey; verified against the on-device manifest hash --"
+echo "see release/DLC-RELEASE.md). Run once per release, before/with publishing:"
+echo "    release/publish-dlc-images.sh"
