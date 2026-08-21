@@ -47,8 +47,8 @@ sign_hash() { # sign_hash <hash.bin> <out.sig> <label>
     tmp="$(mktemp)"
     { printf '%s' "$DIGESTINFO" | xxd -r -p; cat "$hash"; } > "$tmp"
     echo
-    echo ">>> Signing ${label}. Enter the PIV PIN if prompted, then TOUCH the YubiKey when it blinks."
-    pkcs11-tool --module "$MODULE" --login \
+    echo ">>> Signing ${label}. TOUCH the YubiKey when it blinks (PIN already entered)."
+    pkcs11-tool --module "$MODULE" --login "${PIN_ARGS[@]}" \
         --sign --mechanism RSA-PKCS --id "$KEYID" \
         --input-file "$tmp" --output-file "$out"
     rm -f "$tmp"
@@ -62,6 +62,22 @@ sign_hash() { # sign_hash <hash.bin> <out.sig> <label>
     }
     echo "${label} signature verified against $(basename "$PUBKEY")"
 }
+
+# Ask for the PIV PIN ONCE and reuse it for both signatures. Each slot-9C sign
+# does a CKU_USER login AND a CKA_ALWAYS_AUTHENTICATE per-signature re-auth (two
+# prompts), so without this the maintainer would type the PIN four times for the
+# two hashes. --pin feeds both non-interactively (OpenSC >= 0.21 reuses it for
+# the context-specific re-auth). The PIN only ever reaches the local
+# pkcs11-tool. Set PIV_PIN in the environment to skip the prompt. The physical
+# TOUCH is hardware and cannot be consolidated in software (touch-policy=cached
+# coalesces back-to-back signatures into one touch).
+PIN_ARGS=()
+if [ -n "${PIV_PIN:-}" ]; then
+    PIN_ARGS=(--pin "$PIV_PIN")
+else
+    read -rsp "PIV PIN (typed once for both signatures this run): " _pin; echo
+    [ -n "$_pin" ] && PIN_ARGS=(--pin "$_pin")
+fi
 
 sign_hash "$WORK/payload_hash.bin"  "$WORK/payload_hash.sig"  "the payload hash"
 sign_hash "$WORK/metadata_hash.bin" "$WORK/metadata_hash.sig" "the metadata hash"
