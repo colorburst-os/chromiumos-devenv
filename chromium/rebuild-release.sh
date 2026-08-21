@@ -45,8 +45,12 @@ log "chromium-src: hard-reset to pinned base $PINNED_BASE, then apply full serie
 git -C "$CHROME/src" reset --hard "$PINNED_BASE"
 chromium-patches/apply-all.sh "$CHROME/src"
 
-log "platform2: update_engine device-id patch"
-if grep -rqol 'colorburst_device_id' chromiumos/src/platform2/update_engine 2>/dev/null; then
+log "platform2: update_engine patches (device-id + DLC-URL redirect)"
+# Guard on the NEWEST patch's marker: apply.sh applies the whole series in one
+# shot, so if the latest change (the DLC CDN redirect) is present, the earlier
+# device-id patch is too. Checking only the older marker would skip apply.sh on
+# a tree that has device-id but not the newer patch.
+if grep -q 'dl.colorburst.net' chromiumos/src/platform2/update_engine/cros/install_action.cc 2>/dev/null; then
     echo "    already applied -- skipping"
 else
     platform2-patches/apply.sh chromiumos/src/platform2

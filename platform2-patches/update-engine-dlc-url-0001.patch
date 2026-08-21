@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?= <212658678+luuoaoa@users.noreply.github.com>
+Date: Thu, 21 Aug 2026 02:30:00 -0700
+Subject: [PATCH] update_engine: serve scaled DLC images from colorburst's host
+
+Scaled-DLC installs go through InstallAction, which hardcodes Google's CDN
+(edgedl.me.gvt1.com / dl.google.com). colorburst ships a DLC that is not on
+that CDN (edk2-ovmf-dlc), so its install 404s and Crostini fails right after
+termina; and the Google-hosted DLCs (termina) would still be fetched from
+Google, contrary to de-Googling. Point the four hardcoded DLC URLs at
+colorburst's own host (dl.colorburst.net). The image is verified against the
+on-device imageloader manifest image_sha256, so this needs no separate
+signing -- the hosted object must be the exact dlc.img built for the running
+OS version. This is a superset replacement for the reverted factory-install
+approach (which could not survive OTA or powerwash).
+---
+diff --git a/update_engine/cros/install_action.cc b/update_engine/cros/install_action.cc
+index 82e623e170..4669ae4446 100644
+--- a/update_engine/cros/install_action.cc
++++ b/update_engine/cros/install_action.cc
+@@ -31,11 +31,20 @@
+ namespace chromeos_update_engine {
+ 
+ namespace {
+-constexpr char kBandaidUrl[] = "https://edgedl.me.gvt1.com/edgedl/dlc";
+-constexpr char kLorryUrl[] = "https://dl.google.com/dlc";
+-
+-constexpr char kBandaidArtifactsMetaUrl[] = "https://edgedl.me.gvt1.com/edgedl";
+-constexpr char kLorryArtifactsMetaUrl[] = "https://dl.google.com";
++// colorburst: scaled-DLC installs go through this action, which hardcodes
++// Google's CDN. A colorburst-specific DLC (e.g. edk2-ovmf-dlc) is not on that
++// CDN, so it 404s and Crostini install fails right after termina; and even the
++// Google-hosted DLCs (termina) would be fetched from Google, which the fork is
++// meant to avoid. Serve every DLC from colorburst's own host instead. The
++// downloaded image is verified against the on-device imageloader manifest
++// image_sha256 (see OnTransferComplete below), so no separate payload signing
++// is required -- the object hosted must be the exact dlc.img built for the
++// running OS version. Same host for primary and backup (we run one origin).
++constexpr char kBandaidUrl[] = "https://dl.colorburst.net/dlc";
++constexpr char kLorryUrl[] = "https://dl.colorburst.net/dlc";
++
++constexpr char kBandaidArtifactsMetaUrl[] = "https://dl.colorburst.net";
++constexpr char kLorryArtifactsMetaUrl[] = "https://dl.colorburst.net";
+ 
+ constexpr char kUrlNameBandaid[] = "<BANDAID>";
+ constexpr char kUrlNameLorry[] = "<LORRY>";
+-- 
+2.53.0
