@@ -16,12 +16,13 @@ Google's CDN, so it 404s and Crostini install fails right after termina
 downloads — the exact symptom seen on the ThinkPad.
 
 An earlier iteration tried to serve these as DLC-over-Omaha payloads
-(`gen-dlc-payloads.sh`, `sign-dlc-on-yubikey.sh`, `publish-dlcs.sh`, and the
-`appDlcUpdate` path in `update-server/worker.js`). **That approach is retired**
+(`gen-dlc-payloads.sh`, `sign-dlc-on-yubikey.sh`, `publish-dlcs.sh`, and an
+`appDlcUpdate` path in `update-server/worker.js`). **That approach was wrong**
 for these three DLCs: force-ota DLCs bypass Omaha entirely, so the Omaha
-manifest we returned was never consulted for the install. Those scripts and the
-worker's DLC branch are now dead code for this purpose; left in place only for
-reference / possible future scaled-DLC use.
+manifest we returned was never consulted for the install. The scripts, the
+worker branch, the `dlcs` key in `releases.json`, and the `dlcs/` R2 payloads
+have all been removed (they live on in git history if a scaled-DLC ever needs
+the pattern).
 
 ## The fix in place
 
