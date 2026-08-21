@@ -1,183 +1,190 @@
-# colorburst build & VM environment (Dockerized)
+# Building colorburst
 
-Everything here builds and runs **colorburst** — a ChromiumOS fork for
-Vietnamese users — **inside Docker containers**; nothing is installed on the
-host. The board is `colorburst` — based on reven (ChromeOS Flex), kernel 6.12,
-validated on real laptops and in VMs. (`amd64-generic` was the original
-board; retired.)
+This repository is the workshop for **colorburst**, a ChromiumOS fork for
+Vietnamese users: Gaia-less local accounts, a native Vietnamese IME (UniKey
+engine, Telex/VNI/VIQR), no Google services, its own update server. If you
+just want to *use* colorburst, you're in the wrong repo — see
+[`colorburst-os/colorburst`](https://github.com/colorburst-os/colorburst).
+If you want to build the OS yourself, read on.
 
-The user-facing repository is [`colorburst-os/colorburst`](https://github.com/colorburst-os/colorburst).
-This one is the workshop: build tooling, VM tooling, the Chrome patch series,
-and the notes behind every decision.
+Everything builds and runs inside Docker containers; nothing ChromiumOS-related
+is installed on your host. The target board is `colorburst`, based on reven
+(the board behind ChromeOS Flex), kernel 6.12. It runs on ordinary x86_64
+laptops and in VMs.
 
-## Layout
+## What you need
 
-| Path | What it is |
-|---|---|
-| `cros-sdk.sh` | Runs any command in a container. Env knobs: `CROS_IMAGE=` (image to use), `GUI=1` (Wayland/X + GPU render node access), `PUBLISH_PORTS=1` (VNC 5900, SSH 9222 on localhost), `NET=host` (host networking, for flaky container DNS) |
-| `docker/Dockerfile` | `cros-build` image: Ubuntu 24.04 + depot_tools; used for repo sync, cros_sdk chroot, package/image builds |
-| `docker/vm/Dockerfile` | `cros-vm` image: Ubuntu 26.04 with QEMU 10.x (new enough for GL display paths) |
-| `docker/crosvm/Dockerfile` | `cros-crosvm` image: Rust toolchain + wayland/virgl dev libs to build crosvm, plus dnsmasq/iptables for VM networking |
-| `chromiumos/` | The source checkout + SDK chroot + built images (bind-mounted into every container) |
-| `chromium/` | Chrome-side build tooling: fetch a Chromium tree, build it, deploy it to a running VM, cut an image. See [chromium/README.md](chromium/README.md) |
-| `chromium-patches/` | The ~25-patch series that makes Chromium into colorburst's Chrome, plus the rule-based IME and UniKey payloads. Applied in order by `chromium-patches/apply-all.sh` — see [chromium/README.md](chromium/README.md) |
-| `tools/` | `vm-instance.sh` (isolated VMs), `cdp.py` (drive Chrome over DevTools), `guest-type.py` (type on a real keyboard device in the guest), `pak.py`, `local-account-walk.sh` |
+- Linux with Docker and KVM (`/dev/kvm` must exist — check with `ls /dev/kvm`)
+- ~200 GB of free disk. The ChromiumOS checkout alone is ~176 GB, Chromium
+  another ~30 GB
+- Patience for the first build: budget a big source sync plus 2–4 hours of
+  compile on a cold machine. After that, rebuilds take minutes
+- Membership in the `colorburst-os` GitHub org (it is private for now), with
+  git set up to reach it over HTTPS: `gh auth login && gh auth setup-git`.
+  Two of the source projects are pulled from our forks during the sync, so
+  without org access the tree cannot be assembled
 
-## Quick start — from nothing to a VM, end to end
+Host setup details (packages, KVM group membership, Docker) are in
+[RUNNING-VM.md](RUNNING-VM.md) §1.
 
-Five steps, in order. On a cold machine budget **one long build (2–4 h)** plus a
-big first-time source sync; after that, rebuilds are minutes. Everything runs in
-containers — the only thing on your host is Docker.
+## The build, end to end
 
-**Before you start (once):** Docker + KVM (`/dev/kvm` must exist), ~200 GB free
-disk, and membership in the private `colorburst-os` GitHub org with the `gh`
-credential helper set up (`gh auth setup-git`) — the source sync pulls two forks
-over HTTPS. See RUNNING-VM.md §1 for the exact host setup.
+Four steps. Each is a command or two; the work happens in containers.
 
-```bash
-# 1. Assemble the pinned ChromiumOS tree into chromiumos/  (one-time, ~176 GB).
-#    Full recipe under "Reproducing the checkout" below.
+### 1. Assemble the ChromiumOS tree (one-time, ~176 GB)
 
-# 2. Fetch the pinned Chromium base and apply the colorburst patch series.
-#    (Details + the full patch list: chromium/README.md.)
-chromium/fetch.sh                                    # ~30 GB, pinned base 831a446cd4
-git -C ../chromium-src/src checkout -b colorburst 831a446cd4
-chromium-patches/apply-all.sh ../chromium-src/src    # applies the whole series, in order
-
-# 3. Build — ONE command, no decisions. This is the deterministic clean build:
-#    it normalises every patch tree, nukes the board cache, bootstraps the board
-#    (setup_board + build-packages, which compiles OUR patched Chrome), builds
-#    the verity release image, and stages the unsigned OTA payload. Just run it
-#    and wait (2–4 h cold). Signing the payload is a separate maintainer step.
-chromium/rebuild-release.sh
-
-# 4. Run it in a VM — a window on your desktop in ~60 s. Full copy-paste guide:
-#    RUNNING-VM.md.  (CROS_VM_SCSI=1 is required for colorburst images.)
-CROS_VM_SCSI=1 ./run-crosvm.sh \
-    chromiumos/src/build/images/colorburst/latest/colorburst-*-release.bin
-```
-
-All VMs: `ssh -p 9222 root@localhost`, password `test0000`.
-
-**Two kinds of build — pick by what you're doing:**
-
-| You want… | Run | Produces |
-|---|---|---|
-| The shippable, OTA-signable image (what releases are cut from) | `chromium/rebuild-release.sh` | verity **release** image + unsigned payload under `chromiumos/ota-release/<ver>/` |
-| Fast day-to-day iteration in a VM (SSH-able, writable, no signing) | `chromium/bootstrap-board.sh` once, then `chromium/build-image.sh` | **test** image at `…/images/colorburst/latest/chromiumos_test_image.bin` |
-
-`rebuild-release.sh` is the "even a dumb agent just runs this and watches it
-finish" path: it is fully deterministic — the image depends on the committed
-tree, not on who drives it. **Never** run plain `cros build-packages`: it
-force-fetches Chrome from the binhost and throws our patches away.
-
-## Running several VMs at once
-
-Instances are isolated, so multiple people (or agents) can each have their own
-machine:
-
-```bash
-tools/vm-instance.sh alloc alice     # claims a free id, prints its ports
-tools/vm-instance.sh boot 0          # ~60s to the login screen
-tools/vm-instance.sh ssh 0 'uptime'
-tools/vm-instance.sh list
-tools/vm-instance.sh release 0       # kills it and wipes the workspace
-```
-
-Each instance gets a **qcow2 overlay** over the shared base image (so the 11 GB
-base is never written and instances can't corrupt each other), its own host
-ports (SSH `9222+id`, VNC `5900+id`), its own container — hence its own netns,
-so the TAP device and the guest's `192.168.77.2` are identical inside every
-instance — and its own workspace at `chromiumos/.vm/<id>/`.
-
-Releasing wipes the workspace, so the next `alloc` of that id starts from a
-pristine image. Customise an instance by changing its guest, never the base.
-
-**RAM is the limit, not disk.** This host has ~30 GB and a comfortable ChromeOS
-guest wants 8 GB, so `alloc` gives the first instance 8 GB and later ones 4 GB.
-Four concurrent instances is realistic; five will swap. 4 GB reaches the login
-screen but has not been tested under a full session.
-
-## Testing on real hardware (USB)
-
-```bash
-# The image (also hardlinked as colorburst-<version>.bin):
-ls chromiumos/src/build/images/colorburst/latest/
-
-# Flash (check the device letter with lsblk first!):
-sudo dd if=chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin \
-        of=/dev/sdX bs=4M conv=fsync status=progress
-
-# Verify the write before booting -- catches dying sticks:
-sudo cmp chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin /dev/sdX
-```
-
-On the target machine: disable Secure Boot in UEFI, boot from USB, pick
-**local image A** at the boot menu. Trying from USB never touches the
-internal disk; the graphical installer erases the disk it installs to.
-
-## Reproducing the checkout
-
-The ChromiumOS tree is 287 projects and ~176 GB, so it is not stored here.
-It is rebuilt with `repo`, and only the two projects we patch come from
-our own forks:
-
-| Fork | Upstream | Patch |
-|---|---|---|
-| `colorburst-os/crosvm` | `chromiumos/platform/crosvm` | branch `colorburst/gpu-display` — window decorations, configurable display scale, pointer coordinate scaling |
-| `colorburst-os/board-overlays` | `chromiumos/overlays/board-overlays` | branch `colorburst/virgl` — the colorburst appid and `/etc/os-release` fields, and the Gaia-less session_manager flags (video comes from `reven:base`, not this overlay) |
-
-**Access prerequisite:** the two forks live in the **private** `colorburst-os`
-GitHub org. Authorized builders reach them over HTTPS with the `gh` credential
-helper (`gh auth setup-git`) once they are a member of the org — the local
-manifest below fetches them by `https://github.com/colorburst-os/…`. Without
-org access `repo sync` cannot check them out, and the tree cannot be assembled.
-
-Sync the **exact pinned tree** the patch series targets (Chromium r153). The
-`-b stable` branch is a *moving* target and will drift from the pinned SHAs, so
-reproduce byte-for-byte via `pinned-manifest.xml`:
+The tree is 287 git projects, so it lives outside this repo and is rebuilt
+with `repo` from a pinned manifest — you get the exact revisions the patch
+series was written against, not whatever upstream moved to overnight:
 
 ```bash
 mkdir chromiumos && cd chromiumos
-# 1. Init any manifest first, so .repo/manifests exists as a git repo.
+# Init any manifest first, so .repo/manifests exists as a git repo…
 repo init -u https://chromium.googlesource.com/chromiumos/manifest
-# 2. Drop the pinned manifest in and re-init against it. pinned-manifest.xml is
-#    a bare file (not in a manifest git repo), so it must be copied inside.
+# …then drop in the pinned manifest and re-init against it.
 cp ../pinned-manifest.xml .repo/manifests/
 repo init -m pinned-manifest.xml
-# 3. Install the local manifest that swaps crosvm/board-overlays to the forks.
+# Swap crosvm + board-overlays to the colorburst forks.
 mkdir -p .repo/local_manifests
 ln -s ../../../local_manifests/colorburst.xml .repo/local_manifests/
-repo sync -j8
+repo sync -j8        # go make dinner
 ```
 
-`local_manifests/colorburst.xml` swaps those two projects to the forks;
-everything else still comes from upstream.
+Only two projects come from our forks; everything else is upstream at a
+pinned SHA:
 
-`pinned-manifest.xml` records the exact SHA of all 287 projects as of the last
-known-good build. **The local manifest is authoritative for the two forks:** it
-overrides crosvm and board-overlays to *branch refs*
-(`refs/heads/colorburst/gpu-display`, `refs/heads/colorburst/virgl`), so the
-fork SHAs baked into `pinned-manifest.xml` are advisory only — the branch tip
-resolves, not the pinned SHA, and the two can differ. For the ~285 upstream
-projects the pinned SHA is exact. Because those fork revisions exist only in our
-forks, the pinned manifest needs the local manifest (or the forks fetched) to
-resolve at all.
+| Fork | Replaces | What the branch carries |
+|---|---|---|
+| `colorburst-os/crosvm` (`colorburst/gpu-display`) | `chromiumos/platform/crosvm` | window decorations, configurable display scale, pointer coordinate scaling |
+| `colorburst-os/board-overlays` (`colorburst/virgl`) | `chromiumos/overlays/board-overlays` | the colorburst appid, `/etc/os-release` fields, Gaia-less session_manager flags |
 
-Each fork keeps upstream as a remote named `cros`. The patches are
-un-upstreamed and touch files upstream actively changes, so expect to
-rebase rather than merge:
+(For the two forks, the *branch tip* is what resolves — their SHAs in
+`pinned-manifest.xml` are advisory. The other ~285 projects are exact.)
+
+### 2. Fetch Chromium and apply the patch series
+
+colorburst builds its own Chrome from a pinned Chromium base (r153,
+`831a446cd4`) plus a series of ~30 patches — local accounts, the Vietnamese
+IME, the de-Googling, branding. `chromium-patches/apply-all.sh` applies the
+whole series in the right order and leaves a clean tree:
 
 ```bash
-git fetch cros && git rebase cros/chromeos   # in src/platform/crosvm
+chromium/fetch.sh                                    # ~30 GB
+git -C ../chromium-src/src checkout -b colorburst 831a446cd4
+chromium-patches/apply-all.sh ../chromium-src/src
 ```
 
-## The one thing to never forget
+What each patch does, and how the series is maintained, is documented in
+[chromium/README.md](chromium/README.md).
 
-**GPU-accelerated graphics require the *image* to contain the virgl Mesa
-driver.** On the live `colorburst` board this comes for free: `overlay-colorburst`
-sets no `VIDEO_CARDS` of its own and inherits `virgl` from its `reven:base`
-profile. (The retired `overlay-amd64-generic` board carried `virgl` explicitly
-in `profiles/base/make.defaults`; that overlay is no longer used.) Either way,
-if the driver is missing the guest silently falls back to llvmpipe and every VMM
-display shows black after the boot splash.
+### 3. Build the OS image
+
+One command, no decisions:
+
+```bash
+chromium/rebuild-release.sh
+```
+
+This normalises both patched trees to the committed series, wipes the board's
+build cache, bootstraps the board (which compiles *your* patched Chrome —
+this is the 2–4 hour part, mostly Chrome), builds the verity-enabled release
+image, verifies it in place, and stages an unsigned OTA payload. The result
+depends only on the committed tree, which is the point: two people who run it
+on the same commit get the same image.
+
+Signing that payload (YubiKey) and publishing it are maintainer steps — see
+`release/` — but the image itself is yours to boot.
+
+If you're going to hack on the OS day to day, you don't want the full clean
+build every time. After one `chromium/bootstrap-board.sh`, use
+`chromium/build-image.sh` to cut a **test image** in minutes: SSH-able,
+writable rootfs, no signing. The two image types:
+
+| You want… | Run | You get |
+|---|---|---|
+| The shippable release image | `chromium/rebuild-release.sh` | verity release image + unsigned OTA payload under `chromiumos/ota-release/<ver>/` |
+| Fast iteration in a VM | `chromium/bootstrap-board.sh` once, then `chromium/build-image.sh` | test image at `…/images/colorburst/latest/chromiumos_test_image.bin` |
+
+One warning worth reading twice: **never run plain `cros build-packages`
+yourself.** It force-fetches Google's prebuilt Chrome from the binhost and
+silently throws the entire patch series away. The scripts above pass the
+flags that prevent this.
+
+### 4. Boot it
+
+In a VM — a window on your desktop about a minute later:
+
+```bash
+./run-crosvm.sh chromiumos/src/build/images/colorburst/latest/colorburst-*-release.bin
+```
+
+(The disk is presented over virtio-scsi by default — the colorburst kernel
+builds virtio_blk as a module, so a virtio-blk boot disk would hang waiting
+for root. `CROS_VM_SCSI=0` exists only for old amd64-generic images.)
+Every VM is reachable with `ssh -p 9222 root@localhost`,
+password `test0000` (test images only — release images have no remote
+access, by design). The full VM guide, including GPU acceleration and
+troubleshooting, is [RUNNING-VM.md](RUNNING-VM.md).
+
+On real hardware — write a test image to USB and boot it:
+
+```bash
+# Double-check the device letter with lsblk. Really.
+sudo dd if=chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin \
+        of=/dev/sdX bs=4M conv=fsync status=progress
+# Verify the write — catches dying USB sticks before they waste your evening:
+sudo cmp chromiumos/src/build/images/colorburst/latest/chromiumos_test_image.bin /dev/sdX
+```
+
+Disable Secure Boot in the target's UEFI, boot from the stick, and pick
+**local image A** at the boot menu. Running from USB never touches the
+internal disk; the graphical installer, if you choose to run it, erases the
+disk it installs to.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `cros-sdk.sh` | Run any command inside the build container. Knobs: `CROS_IMAGE=` (image), `GUI=1` (Wayland/X + GPU), `PUBLISH_PORTS=1` (VNC 5900, SSH 9222), `NET=host` |
+| `docker/` | The three container images: `cros-build` (sync + build), `cros-vm` (QEMU), `cros-crosvm` (crosvm + VM networking) |
+| `chromiumos/` | The source checkout, SDK chroot, and built images (bind-mounted into every container) |
+| `chromium/` | Chrome-side tooling: fetch, build, deploy-to-VM, image cutting — see [chromium/README.md](chromium/README.md) |
+| `chromium-patches/` | The patch series + vendored IME payloads, applied by `apply-all.sh` |
+| `platform2-patches/` | update_engine patches (device id, DLC fetch host) |
+| `release/` | Payload generation, YubiKey signing, publishing — maintainer territory |
+| `tools/` | `vm-instance.sh` (parallel VMs), `cdp.py` (drive Chrome via DevTools), `guest-type.py`, and friends |
+
+## Several VMs at once
+
+Instances are isolated — each gets a qcow2 overlay over the shared base image
+(the base is never written), its own container and network namespace, and its
+own host ports (SSH `9222+id`, VNC `5900+id`):
+
+```bash
+tools/vm-instance.sh alloc alice     # claims a free id, prints its ports
+tools/vm-instance.sh boot 0          # ~60 s to the login screen
+tools/vm-instance.sh ssh 0 'uptime'
+tools/vm-instance.sh list
+tools/vm-instance.sh release 0      # kill + wipe; next alloc starts pristine
+```
+
+RAM is the limit, not disk: a comfortable ChromeOS guest wants 8 GB, and a
+minimal one boots in 4 GB. Size your instance count to your machine.
+
+## Keeping the forks fresh
+
+Each fork keeps upstream as a remote named `cros`. The patches touch files
+upstream changes actively, so rebase rather than merge:
+
+```bash
+git fetch cros && git rebase cros/chromeos   # e.g. in src/platform/crosvm
+```
+
+## The one thing people always hit
+
+**GPU-accelerated graphics require the virgl Mesa driver *inside the image*.**
+On the colorburst board this comes for free (inherited from the `reven:base`
+profile). But if you ever see every VMM display go black right after the boot
+splash while the system otherwise runs — that's the guest silently falling
+back to llvmpipe, and it means the image you built lost the virgl driver.
+Check the board profile before debugging anything else.
