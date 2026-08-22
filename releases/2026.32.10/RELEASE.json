@@ -18,7 +18,20 @@
       "crosvm": "d1dd56403fb897955c54f2827aa4e5851db1f1e5"
     }
   },
-  "artifacts": {},
+  "artifacts": {
+    "image": {
+      "name": "colorburst-2026.32.10-release.bin",
+      "sha256": "459ed831fd997563dd9fe8a5217971e3c5a7456e7ebbd68213e8d144dedfaca1",
+      "size": 6973161472
+    },
+    "ota_payload": {
+      "name": "colorburst-2026.32.10-full-signed.bin",
+      "sha256": "b68b938e0f8f1d7b75df6f2ce7f295cbc5b2861a5ac152868ef486cafef54720",
+      "size": 741184812,
+      "metadata_size": 65978,
+      "is_delta": false
+    }
+  },
   "signing": {
     "key": "update-payload-key.pub.pem",
     "slot": "YubiKey PIV 9C"
