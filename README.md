@@ -140,23 +140,38 @@ flags that prevent this.
 The build prints the path; release images land in
 `chromiumos/src/build/images/colorburst/latest/`.
 
-**Pick a language, without building again.** The image you just built is the
-English one. The OOBE language, keyboard list and timezone all follow the
-device *region*, and the region is one line of text on the OEM partition —
-read at boot by session_manager and handed to Chrome as `--cros-region`:
+**Pick a language, without building again.** How a device behaves — today its
+language, in time more than that — is a plain-text file, `colorburst.txt`, on
+the OEM partition, read at boot by session_manager:
 
 ```bash
 release/make-variant.sh vn <image>.bin <image>-vi.bin    # Vietnamese
-release/make-variant.sh --show <image>.bin              # what is this image?
+release/make-variant.sh --show <image>.bin               # what is this image?
 ```
 
+Needs `mtools` and `e2fsprogs` on the host (`sudo apt install mtools
+e2fsprogs`); no root, no loop devices.
+
 That partition carries neither a verity hash tree nor a signature, so this is
-a ~300-byte edit to a 6.6 GB image: no rebuild, no re-sign, and the kernel and
-rootfs stay byte-identical, which is why every variant shares one OTA payload.
-It is also the only partition that survives all three of install, OTA and
-powerwash — so a machine keeps the language of the stick it was installed
-from, permanently. Any region in the image's `cros-regions.json` works;
-`make-variant.sh` refuses the ones that aren't.
+a few hundred bytes of edit to a 6.6 GB image: no rebuild, no re-sign, and the
+kernel and rootfs stay byte-identical, which is why every variant shares one
+OTA payload. It is also the only partition that survives all three of install,
+OTA and powerwash — so a machine keeps the language of the stick it was
+installed from, permanently.
+
+It is **FAT32, typed as Microsoft basic data**, which means that after writing
+the image to a USB stick, Windows shows the partition in Explorer and the file
+opens in Notepad. That is the point: the person setting up a laptop for
+somebody else can change the language without booting Linux. `make-variant.sh`
+writes CRLF line endings, and the parser tolerates a UTF-8 BOM, `;` comments,
+quotes and any capitalisation, because Notepad produces all of those.
+
+Two limits worth knowing. Windows shows the partition on **removable** media;
+once installed to an internal disk the partition is retyped by the installer
+from the board's layout, so a dual-boot Windows will not mount it. And any
+region in the image's `cros-regions.json` works — `make-variant.sh` refuses
+the ones that aren't, rather than letting a typo ship as a silent fallback to
+English.
 
 **Run it in a VM.** This is where crosvm comes in, and it needs its own
 one-time setup (KVM, a desktop session, building the VM runner). All of it is

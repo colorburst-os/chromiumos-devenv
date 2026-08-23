@@ -1,5 +1,25 @@
+diff --git a/login_manager/BUILD.gn b/login_manager/BUILD.gn
+index 54b6638262..99dc86f27f 100644
+--- a/login_manager/BUILD.gn
++++ b/login_manager/BUILD.gn
+@@ -107,6 +107,7 @@ static_library("libsession_manager") {
+     "browser_job.cc",
+     "chrome_features_service_client.cc",
+     "chrome_setup.cc",
++    "colorburst_config.cc",
+     "chromium_command_builder.cc",
+     "container_manager_interface.cc",
+     "cumulative_use_time_metric.cc",
+@@ -266,6 +267,7 @@ if (use.test) {
+       "arc_manager_test.cc",
+       "browser_job_test.cc",
+       "chrome_setup_test.cc",
++      "colorburst_config_test.cc",
+       "chromium_command_builder_test.cc",
+       "cumulative_use_time_metric_test.cc",
+       "device_identifier_generator_test.cc",
 diff --git a/login_manager/chrome_setup.cc b/login_manager/chrome_setup.cc
-index f15b7665fc..354d5d8378 100644
+index f15b7665fc..9b483a3c53 100644
 --- a/login_manager/chrome_setup.cc
 +++ b/login_manager/chrome_setup.cc
 @@ -12,6 +12,8 @@
@@ -11,57 +31,28 @@ index f15b7665fc..354d5d8378 100644
  #include <utility>
  #include <vector>
  
-@@ -138,6 +140,57 @@ namespace {
+@@ -45,6 +47,7 @@
+ #include "login_manager/arc_dlc_hardware_filter_impl.h"
+ #include "login_manager/arc_dlc_platform_info_impl.h"
+ #include "login_manager/chromium_command_builder.h"
++#include "login_manager/colorburst_config.h"
+ #include "login_manager/util.h"
+ 
+ // IMPORTANT: If you want to check for the presence of a new USE flag within
+@@ -138,6 +141,20 @@ namespace {
  // ChromiumCommandBuilder::ApplyUserConfig().
  const char kChromeDevConfigPath[] = "/etc/chrome_dev.conf";
  
-+// NOTE(colorburst fork): the image is region-neutral; the region is DATA, and
-+// it lives on the OEM partition (#8, mounted read-only at /usr/share/oem).
-+//
-+// One build produces every USB variant. A variant is made by writing this one
-+// file into the OEM partition of an already-built image -- no rebuild, no
-+// re-sign, since that partition carries neither verity nor a signature. The
-+// point of choosing partition 8 over anything else is that it is the only
-+// place that survives all three of:
-+//
-+//   * install   -- chromeos-install copies it USB -> disk (chromeos-install.sh,
-+//                  copy_partition "${PARTITION_NUM_OEM}")
-+//   * OTA       -- update payloads carry KERN + ROOT only
-+//   * powerwash -- clobber_state wipes STATE (#1)
-+//
-+// so a device keeps the personality of the stick it was installed from, for
-+// good, and one OTA stream serves every variant.
-+//
-+// Format is key=value, one per line, '#' comments allowed:
-+//
-+//   region=vn
-+//
-+// Chrome turns the region into the OOBE language, the keyboard list and the
-+// timezone via /usr/share/misc/cros-regions.json. An absent, unreadable or
-+// malformed file means kColorburstDefaultRegion -- English, which is also what
-+// a plain unrepacked image gives you.
-+constexpr char kColorburstVariantPath[] = "/usr/share/oem/colorburst/variant";
-+constexpr char kColorburstDefaultRegion[] = "us";
-+constexpr char kColorburstRegionKey[] = "region=";
-+// Region codes in cros-regions.json are lowercase and may carry '.' or '-'
-+// ("us", "vn", "nordic", "latam-es-419"). Anything else does not name a region,
-+// and this string goes onto Chrome's command line, so it is validated rather
-+// than trusted: the OEM partition is writable by anyone holding the disk.
-+constexpr char kColorburstRegionChars[] =
-+    "abcdefghijklmnopqrstuvwxyz0123456789.-";
-+constexpr size_t kColorburstRegionMaxLen = 32;
-+// The real file is three short lines. The cap only bounds how much of a
-+// corrupted 16 MiB partition gets read into memory before it is rejected.
-+constexpr size_t kColorburstVariantMaxSize = 4096;
 +
-+// Passes the OEM partition's region to Chrome. This is add-always rather than
++// Passes the colorburst variant's region to Chrome. Add-always rather than
 +// add-if-absent on purpose: it must beat the compiled-in fallback in
 +// ChromeMainDelegate (chrome_main_delegate.cc), which is add-if-absent. It runs
 +// before ApplyUserConfig(), so chrome_dev.conf can still override it on a
 +// developer image.
 +void AddColorburstRegionFlag(ChromiumCommandBuilder* builder) {
 +  const std::string region =
-+      GetColorburstRegion(base::FilePath(kColorburstVariantPath));
++      ColorburstConfig::Load(base::FilePath(ColorburstConfig::kDefaultPath))
++          .GetRegion();
 +  LOG(INFO) << "colorburst: region " << region;
 +  builder->AddArg(base::StringPrintf("--cros-region=%s", region.c_str()));
 +}
@@ -69,45 +60,7 @@ index f15b7665fc..354d5d8378 100644
  // Returns a base::FilePath corresponding to the DATA_DIR environment variable.
  base::FilePath GetDataDir(ChromiumCommandBuilder* builder) {
    return base::FilePath(builder->ReadEnvVar("DATA_DIR"));
-@@ -517,6 +570,37 @@ void AddEnterpriseFlags(ChromiumCommandBuilder* builder) {
- 
- }  // namespace
- 
-+// NOTE(colorburst fork): see kColorburstVariantPath above for what this file is
-+// and why it lives on the OEM partition. Defined out here, and declared in the
-+// header, so chrome_setup_test.cc can point it at a temp file -- the real path
-+// is absolute and a unit test cannot write to it.
-+std::string GetColorburstRegion(const base::FilePath& variant_path) {
-+  std::string contents;
-+  if (!base::ReadFileToStringWithMaxSize(variant_path, &contents,
-+                                         kColorburstVariantMaxSize)) {
-+    return kColorburstDefaultRegion;
-+  }
-+  for (std::string_view line :
-+       base::SplitStringPiece(contents, "\n", base::TRIM_WHITESPACE,
-+                              base::SPLIT_WANT_NONEMPTY)) {
-+    if (base::StartsWith(line, "#") ||
-+        !base::StartsWith(line, kColorburstRegionKey)) {
-+      continue;
-+    }
-+    const std::string_view region =
-+        line.substr(std::string_view(kColorburstRegionKey).size());
-+    if (region.empty() || region.size() > kColorburstRegionMaxLen ||
-+        region.find_first_not_of(kColorburstRegionChars) !=
-+            std::string_view::npos) {
-+      LOG(WARNING) << "colorburst: ignoring malformed region in "
-+                   << variant_path;
-+      return kColorburstDefaultRegion;
-+    }
-+    return std::string(region);
-+  }
-+  return kColorburstDefaultRegion;
-+}
-+
- ChromeSetup::ChromeSetup(brillo::CrosConfigInterface& cros_config,
-                          segmentation::FeatureManagement& feature_management)
-     : cros_config_(cros_config), feature_management_(feature_management) {}
-@@ -537,6 +621,7 @@ std::optional<ChromeSetup::Result> ChromeSetup::Run() {
+@@ -537,6 +554,7 @@ std::optional<ChromeSetup::Result> ChromeSetup::Run() {
    AddSerializedAshSwitches(&builder, &cros_config_);
    AddSystemFlags(&builder, &cros_config_);
    AddUiFlags(&builder, &cros_config_);
@@ -115,128 +68,497 @@ index f15b7665fc..354d5d8378 100644
    AddArcFlags(&builder, &disallowed_prefixes, &cros_config_);
    AddArcDlcFlags(&builder, nullptr);
    AddCrostiniFlags(&builder);
-diff --git a/login_manager/chrome_setup.h b/login_manager/chrome_setup.h
-index 4100dc84de..64fe229939 100644
---- a/login_manager/chrome_setup.h
-+++ b/login_manager/chrome_setup.h
-@@ -188,6 +188,16 @@ void SetUpSchedulerFlags(chromeos::ui::ChromiumCommandBuilder* builder,
- void AddSerializedAshSwitches(chromeos::ui::ChromiumCommandBuilder* builder,
-                               brillo::CrosConfigInterface* cros_config);
- 
-+// NOTE(colorburst fork): reads the device region from a colorburst variant
-+// marker -- a key=value file on the OEM partition, '#' comments allowed:
-+//
-+//     region=vn
-+//
-+// Returns "us" for an absent, unreadable or malformed file, which is what an
-+// unrepacked image (empty OEM partition) is. Called by
-+// AddColorburstRegionFlag and only present in the header for testing.
-+std::string GetColorburstRegion(const base::FilePath& variant_path);
+diff --git a/login_manager/colorburst_config.cc b/login_manager/colorburst_config.cc
+new file mode 100644
+index 0000000000..bf79173034
+--- /dev/null
++++ b/login_manager/colorburst_config.cc
+@@ -0,0 +1,152 @@
++// Copyright 2026 The ChromiumOS Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
 +
- // Add flags to specify the wallpaper to use. This is called by
- // PerformChromeSetup and only present in the header for testing.
- // Flags are added to |builder|, and |path_exists| is called to test whether a
-diff --git a/login_manager/chrome_setup_test.cc b/login_manager/chrome_setup_test.cc
-index b1b3fb8b18..75583e6389 100644
---- a/login_manager/chrome_setup_test.cc
-+++ b/login_manager/chrome_setup_test.cc
-@@ -7,6 +7,8 @@
- #include <memory>
- #include <optional>
- #include <set>
++#include "login_manager/colorburst_config.h"
++
 +#include <string>
 +#include <string_view>
- #include <utility>
- 
- #include <base/check.h>
-@@ -112,6 +114,90 @@ class ChromeSetupTest : public ::testing::Test {
-   segmentation::fake::FeatureManagementFake* fake_feature_management_;
- };
- 
-+// NOTE(colorburst fork): the colorburst variant marker. This one file decides
-+// which language a USB image boots in, and a wrong answer is silent -- the
-+// machine comes up fine, just in the wrong language -- so the parser is pinned
-+// down here rather than trusted.
-+class ColorburstRegionTest : public ::testing::Test {
++#include <utility>
++#include <vector>
++
++#include <base/files/file_util.h>
++#include <base/logging.h>
++#include <base/strings/string_split.h>
++#include <base/strings/string_util.h>
++
++namespace login_manager {
++
++const char ColorburstConfig::kDefaultPath[] = "/usr/share/oem/colorburst.txt";
++const size_t ColorburstConfig::kMaxFileSize = 64 * 1024;
++
++namespace {
++
++// Region codes and every other identifier the config deals in.
++constexpr char kTokenChars[] = "abcdefghijklmnopqrstuvwxyz0123456789.-";
++constexpr size_t kTokenMaxLen = 32;
++
++constexpr char kDefaultRegion[] = "us";
++constexpr char kRegionKey[] = "region";
++
++// Notepad writes this at the front of a UTF-8 file. Without stripping it the
++// first key silently becomes "\xEF\xBB\xBFregion" and the whole file looks like
++// it did not take.
++constexpr std::string_view kUtf8Bom = "\xEF\xBB\xBF";
++
++// Trims whitespace, then one matching pair of single or double quotes, then
++// whitespace again. region = "vn" is a reasonable thing for a person to type.
++std::string_view Unquote(std::string_view value) {
++  value = base::TrimWhitespaceASCII(value, base::TRIM_ALL);
++  if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') &&
++      value.back() == value.front()) {
++    value = base::TrimWhitespaceASCII(value.substr(1, value.size() - 2),
++                                      base::TRIM_ALL);
++  }
++  return value;
++}
++
++}  // namespace
++
++ColorburstConfig::ColorburstConfig() = default;
++ColorburstConfig::ColorburstConfig(const ColorburstConfig&) = default;
++ColorburstConfig& ColorburstConfig::operator=(const ColorburstConfig&) =
++    default;
++ColorburstConfig::~ColorburstConfig() = default;
++
++// static
++ColorburstConfig ColorburstConfig::Load(const base::FilePath& path) {
++  std::string contents;
++  if (!base::ReadFileToStringWithMaxSize(path, &contents, kMaxFileSize)) {
++    // Overwhelmingly the normal case: a plain image has an empty OEM
++    // partition. Not worth a warning.
++    VLOG(1) << "colorburst: no configuration at " << path;
++    return ColorburstConfig();
++  }
++  ColorburstConfig config = ParseForTesting(contents);
++  LOG(INFO) << "colorburst: read " << config.size() << " setting(s) from "
++            << path;
++  return config;
++}
++
++// static
++ColorburstConfig ColorburstConfig::ParseForTesting(std::string_view contents) {
++  ColorburstConfig config;
++
++  if (contents.substr(0, kUtf8Bom.size()) == kUtf8Bom) {
++    contents = contents.substr(kUtf8Bom.size());
++  }
++
++  // Splitting on '\n' and trimming leaves CRLF handled: TRIM_ALL eats the '\r'.
++  for (std::string_view line : base::SplitStringPiece(
++           contents, "\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    if (line.front() == '#' || line.front() == ';') {
++      continue;
++    }
++    const size_t eq = line.find('=');
++    if (eq == std::string_view::npos) {
++      LOG(WARNING) << "colorburst: ignoring line with no '=': " << line;
++      continue;
++    }
++    const std::string key = base::ToLowerASCII(
++        base::TrimWhitespaceASCII(line.substr(0, eq), base::TRIM_ALL));
++    if (key.empty()) {
++      LOG(WARNING) << "colorburst: ignoring line with an empty key";
++      continue;
++    }
++    // First occurrence wins, so a value appended to a file that already sets it
++    // cannot silently override what is already there.
++    config.values_.emplace(key, std::string(Unquote(line.substr(eq + 1))));
++  }
++  return config;
++}
++
++std::optional<std::string> ColorburstConfig::GetRaw(
++    std::string_view key) const {
++  const auto it = values_.find(base::ToLowerASCII(key));
++  if (it == values_.end()) {
++    return std::nullopt;
++  }
++  return it->second;
++}
++
++std::string ColorburstConfig::GetToken(std::string_view key,
++                                       std::string_view default_value) const {
++  const std::optional<std::string> raw = GetRaw(key);
++  if (!raw.has_value()) {
++    return std::string(default_value);
++  }
++  // Lowercased before validation, so REGION=VN works, but nothing outside the
++  // token alphabet survives -- these strings reach Chrome's command line, and
++  // the OEM partition is writable by anyone holding the disk.
++  const std::string value = base::ToLowerASCII(*raw);
++  if (value.empty() || value.size() > kTokenMaxLen ||
++      value.find_first_not_of(kTokenChars) != std::string::npos) {
++    LOG(WARNING) << "colorburst: '" << key << "' is not a valid name; using '"
++                 << default_value << "'";
++    return std::string(default_value);
++  }
++  return value;
++}
++
++bool ColorburstConfig::GetBool(std::string_view key, bool default_value) const {
++  const std::optional<std::string> raw = GetRaw(key);
++  if (!raw.has_value()) {
++    return default_value;
++  }
++  const std::string value = base::ToLowerASCII(*raw);
++  if (value == "true" || value == "yes" || value == "on" || value == "1") {
++    return true;
++  }
++  if (value == "false" || value == "no" || value == "off" || value == "0") {
++    return false;
++  }
++  LOG(WARNING) << "colorburst: '" << key << "' is not yes/no; using "
++               << (default_value ? "yes" : "no");
++  return default_value;
++}
++
++std::string ColorburstConfig::GetRegion() const {
++  return GetToken(kRegionKey, kDefaultRegion);
++}
++
++}  // namespace login_manager
+diff --git a/login_manager/colorburst_config.h b/login_manager/colorburst_config.h
+new file mode 100644
+index 0000000000..8a2d137e87
+--- /dev/null
++++ b/login_manager/colorburst_config.h
+@@ -0,0 +1,111 @@
++// Copyright 2026 The ChromiumOS Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef LOGIN_MANAGER_COLORBURST_CONFIG_H_
++#define LOGIN_MANAGER_COLORBURST_CONFIG_H_
++
++#include <map>
++#include <optional>
++#include <string>
++#include <string_view>
++
++#include <base/files/file_path.h>
++
++namespace login_manager {
++
++// NOTE(colorburst fork): the colorburst variant configuration -- one plain-text
++// file on the OEM partition that says how this particular device should behave.
++//
++// It is what makes one build serve every variant. The OEM partition (#8) is the
++// only one that survives all three of install (chromeos-install copies it
++// USB -> disk), OTA (payloads carry KERN + ROOT only) and powerwash
++// (clobber_state wipes STATE), and it carries neither a dm-verity hash tree nor
++// a signature -- so a variant is made by writing this file into an
++// already-built image, and the device then keeps that personality for good.
++// release/make-variant.sh in chromiumos-devenv does the writing.
++//
++// The partition is FAT, and the file sits at its root, so the person making a
++// USB stick can open it in Notepad on Windows. That audience drives every
++// parsing decision here:
++//
++//   * CRLF line endings and a UTF-8 BOM are normal, not corruption. Notepad
++//     writes both.
++//   * Keys and boolean values are case-insensitive, and surrounding quotes are
++//     stripped: REGION="VN" means the same as region=vn.
++//   * '#' and ';' both start a comment. Windows users expect ';' from .ini.
++//   * An unparseable line is skipped, and a value that fails validation falls
++//     back to that setting's default. One bad line must never take the machine
++//     with it -- a device that will not boot is far worse than one in the wrong
++//     language, and the person who made the typo is not the person holding the
++//     laptop.
++//   * Unknown keys are ignored, so an older build reads a newer file.
++//
++// Format, then, is just key=value:
++//
++//     # colorburst configuration
++//     region=vn
++//
++// There is deliberately no version key: settings are additive and unknown keys
++// are ignored, so old and new files are mutually readable. Adding one means
++// adding an accessor here, not a format migration.
++class ColorburstConfig {
++ public:
++  // Where the file lives on a booted device. The OEM partition is mounted
++  // read-only at /usr/share/oem by chromeos_startup (see
++  // init/startup/stateful_mount.cc).
++  static const char kDefaultPath[];
++
++  // Anything past this is not a configuration file. It only bounds how much of
++  // a corrupted partition is read before being rejected; the real file is a
++  // few short lines.
++  static const size_t kMaxFileSize;
++
++  ColorburstConfig();
++  ColorburstConfig(const ColorburstConfig&);
++  ColorburstConfig& operator=(const ColorburstConfig&);
++  ~ColorburstConfig();
++
++  // Reads and parses |path|. Never fails and never throws: an absent,
++  // unreadable or wholly malformed file yields an empty config, and an empty
++  // config means every accessor returns its default.
++  static ColorburstConfig Load(const base::FilePath& path);
++
++  // Parses |contents| directly. Load() is this plus a file read.
++  static ColorburstConfig ParseForTesting(std::string_view contents);
++
++  // The value for |key| exactly as written (minus quotes and whitespace), or
++  // nullopt when the key is absent. Prefer the typed accessors.
++  std::optional<std::string> GetRaw(std::string_view key) const;
++
++  // A short lowercase token: letters, digits, '.' and '-', at most 32 bytes.
++  // That covers every identifier the configuration deals in -- region codes,
++  // and whatever names come next -- and, importantly, excludes anything that
++  // could smuggle a second switch onto Chrome's command line. Returns
++  // |default_value| if the key is absent or the value is not such a token.
++  std::string GetToken(std::string_view key,
++                       std::string_view default_value) const;
++
++  // Accepts true/false, yes/no, on/off and 1/0. Returns |default_value| if the
++  // key is absent or the value is none of those. This is the seam the next
++  // settings hang off; nothing reads a boolean yet.
++  bool GetBool(std::string_view key, bool default_value) const;
++
++  // The device region: what Chrome turns into the OOBE language, the keyboard
++  // list and the timezone, via /usr/share/misc/cros-regions.json. Defaults to
++  // "us", which is also what an image with an untouched OEM partition gives.
++  std::string GetRegion() const;
++
++  // Number of key=value pairs that parsed. Zero is the normal state for a
++  // plain image.
++  size_t size() const { return values_.size(); }
++
++ private:
++  // Lowercased key -> value. std::less<> so string_view lookups do not
++  // allocate.
++  std::map<std::string, std::string, std::less<>> values_;
++};
++
++}  // namespace login_manager
++
++#endif  // LOGIN_MANAGER_COLORBURST_CONFIG_H_
+diff --git a/login_manager/colorburst_config_test.cc b/login_manager/colorburst_config_test.cc
+new file mode 100644
+index 0000000000..97d54f1db7
+--- /dev/null
++++ b/login_manager/colorburst_config_test.cc
+@@ -0,0 +1,213 @@
++// Copyright 2026 The ChromiumOS Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "login_manager/colorburst_config.h"
++
++#include <string>
++#include <string_view>
++
++#include <base/check.h>
++#include <base/files/file_path.h>
++#include <base/files/file_util.h>
++#include <base/files/scoped_temp_dir.h>
++#include <gtest/gtest.h>
++
++namespace login_manager {
++
++namespace {
++
++// Parses |contents| as if it were the file on the OEM partition.
++ColorburstConfig Parse(std::string_view contents) {
++  return ColorburstConfig::ParseForTesting(contents);
++}
++
++std::string RegionOf(std::string_view contents) {
++  return Parse(contents).GetRegion();
++}
++
++}  // namespace
++
++// This one file decides how a device behaves, it is edited by hand on Windows,
++// and a wrong answer is silent -- the machine boots fine, just wrong. So the
++// parser is pinned down rather than trusted.
++class ColorburstConfigTest : public ::testing::Test {
 + public:
 +  void SetUp() override { CHECK(dir_.CreateUniqueTempDir()); }
 +
-+  // Writes |contents| to a marker file and returns the region parsed from it.
-+  std::string RegionFor(std::string_view contents) {
-+    const base::FilePath path = dir_.GetPath().Append("variant");
++  base::FilePath WriteConfig(std::string_view contents) {
++    const base::FilePath path = dir_.GetPath().Append("colorburst.txt");
 +    CHECK(base::WriteFile(path, contents));
-+    return GetColorburstRegion(path);
++    return path;
 +  }
 +
 +  base::ScopedTempDir dir_;
 +};
 +
-+TEST_F(ColorburstRegionTest, MissingFileIsEnglish) {
++// --- the empty cases: a plain image, and anything unreadable ----------------
++
++TEST_F(ColorburstConfigTest, MissingFileIsAllDefaults) {
 +  // An image straight off the build, with an empty OEM partition.
-+  EXPECT_EQ("us", GetColorburstRegion(dir_.GetPath().Append("nonexistent")));
++  const ColorburstConfig config =
++      ColorburstConfig::Load(dir_.GetPath().Append("nonexistent"));
++  EXPECT_EQ(0u, config.size());
++  EXPECT_EQ("us", config.GetRegion());
++  EXPECT_TRUE(config.GetBool("anything", true));
++  EXPECT_FALSE(config.GetBool("anything", false));
 +}
 +
-+TEST_F(ColorburstRegionTest, ReadsTheRegion) {
-+  EXPECT_EQ("vn", RegionFor("region=vn\n"));
++TEST_F(ColorburstConfigTest, LoadReadsAFileFromDisk) {
++  EXPECT_EQ("vn", ColorburstConfig::Load(WriteConfig("region=vn\n")).GetRegion());
 +}
 +
-+TEST_F(ColorburstRegionTest, IgnoresCommentsAndBlankLines) {
-+  // The marker release/make-variant.sh actually writes.
++TEST_F(ColorburstConfigTest, EmptyFileIsAllDefaults) {
++  EXPECT_EQ("us", RegionOf(""));
++  EXPECT_EQ(0u, Parse("").size());
++}
++
++TEST_F(ColorburstConfigTest, CommentsOnlyIsAllDefaults) {
++  EXPECT_EQ(0u, Parse("# nothing here\n; nor here\n").size());
++}
++
++// --- the shape of the file --------------------------------------------------
++
++TEST_F(ColorburstConfigTest, ReadsTheRegion) {
++  EXPECT_EQ("vn", RegionOf("region=vn\n"));
++}
++
++TEST_F(ColorburstConfigTest, IgnoresCommentsAndBlankLines) {
 +  EXPECT_EQ("vn",
-+            RegionFor("# colorburst variant marker -- read at boot.\n"
-+                      "# Survives install, OTA and powerwash.\n"
-+                      "\n"
-+                      "region=vn\n"));
++            RegionOf("# colorburst configuration\n"
++                     "\n"
++                     "; semicolon comments too, as in .ini\n"
++                     "region=vn\n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, ToleratesNoTrailingNewline) {
-+  EXPECT_EQ("vn", RegionFor("region=vn"));
++TEST_F(ColorburstConfigTest, ToleratesNoTrailingNewline) {
++  EXPECT_EQ("vn", RegionOf("region=vn"));
 +}
 +
-+TEST_F(ColorburstRegionTest, AcceptsCompoundRegionCodes) {
-+  // cros-regions.json really has entries shaped like these; they must not be
-+  // mistaken for malformed input.
-+  EXPECT_EQ("latam-es-419", RegionFor("region=latam-es-419\n"));
-+  EXPECT_EQ("br.abnt", RegionFor("region=br.abnt\n"));
++TEST_F(ColorburstConfigTest, ToleratesWhitespaceAroundEverything) {
++  EXPECT_EQ("vn", RegionOf("   region   =   vn   \n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, KeepsTheFirstRegionLine) {
-+  EXPECT_EQ("vn", RegionFor("region=vn\nregion=us\n"));
++TEST_F(ColorburstConfigTest, KeepsTheFirstValueForAKey) {
++  // Appending to a file that already sets something must not silently win.
++  EXPECT_EQ("vn", RegionOf("region=vn\nregion=us\n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, EmptyValueIsEnglish) {
-+  EXPECT_EQ("us", RegionFor("region=\n"));
++TEST_F(ColorburstConfigTest, UnknownKeysAreIgnoredButParsed) {
++  // Forward compatibility: an older build reads a newer file and still gets
++  // the settings it does understand.
++  const ColorburstConfig config =
++      Parse("region=vn\nsomething_from_the_future=42\n");
++  EXPECT_EQ("vn", config.GetRegion());
++  EXPECT_EQ(2u, config.size());
 +}
 +
-+TEST_F(ColorburstRegionTest, EmptyFileIsEnglish) {
-+  EXPECT_EQ("us", RegionFor(""));
++TEST_F(ColorburstConfigTest, JunkLinesAreSkippedNotFatal) {
++  // One bad line must not take the rest of the file with it.
++  EXPECT_EQ("vn", RegionOf("this line has no equals sign\nregion=vn\n"));
++  EXPECT_EQ("vn", RegionOf("=novalue\nregion=vn\n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, UnrelatedKeysAreIgnored) {
-+  EXPECT_EQ("us", RegionFor("variant=vi\nnotes=hello\n"));
++// --- written by Notepad on Windows ------------------------------------------
++
++TEST_F(ColorburstConfigTest, HandlesCrlfLineEndings) {
++  EXPECT_EQ("vn", RegionOf("# comment\r\nregion=vn\r\n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, RejectsSmuggledSwitches) {
-+  // This string becomes a Chrome command-line argument, and the OEM partition
-+  // is writable by anyone holding the disk. Falling back to the default beats
-+  // passing it along.
-+  EXPECT_EQ("us", RegionFor("region=vn --disable-gaia-services\n"));
-+  EXPECT_EQ("us", RegionFor("region=vn;rm -rf /\n"));
-+  EXPECT_EQ("us", RegionFor("region=../../etc/passwd\n"));
-+  EXPECT_EQ("us", RegionFor("region=VN\n"));
++TEST_F(ColorburstConfigTest, HandlesUtf8Bom) {
++  // Notepad's "UTF-8" encoding writes a BOM. Without stripping it the first key
++  // becomes "\xEF\xBB\xBFregion" and the file looks like it did not take.
++  EXPECT_EQ("vn", RegionOf("\xEF\xBB\xBF" "region=vn\n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, RejectsAnOverlongRegion) {
-+  EXPECT_EQ("us", RegionFor("region=" + std::string(33, 'a') + "\n"));
++TEST_F(ColorburstConfigTest, HandlesBomAndCrlfTogether) {
++  // Which is what you actually get from Notepad.
++  EXPECT_EQ("vn", RegionOf("\xEF\xBB\xBF" "# colorburst\r\nregion=vn\r\n"));
++}
++
++TEST_F(ColorburstConfigTest, KeysAndValuesAreCaseInsensitive) {
++  EXPECT_EQ("vn", RegionOf("REGION=VN\n"));
++  EXPECT_EQ("vn", RegionOf("Region=Vn\n"));
++}
++
++TEST_F(ColorburstConfigTest, StripsQuotes) {
++  EXPECT_EQ("vn", RegionOf("region=\"vn\"\n"));
++  EXPECT_EQ("vn", RegionOf("region='vn'\n"));
++  EXPECT_EQ("vn", RegionOf("region = \" vn \" \n"));
++}
++
++TEST_F(ColorburstConfigTest, UnbalancedQuotesAreNotStripped) {
++  // ...and therefore fail validation rather than becoming a surprise value.
++  EXPECT_EQ("us", RegionOf("region=\"vn\n"));
++}
++
++// --- validation -------------------------------------------------------------
++
++TEST_F(ColorburstConfigTest, AcceptsCompoundRegionCodes) {
++  // cros-regions.json really has entries shaped like these.
++  EXPECT_EQ("latam-es-419", RegionOf("region=latam-es-419\n"));
++  EXPECT_EQ("br.abnt", RegionOf("region=br.abnt\n"));
++}
++
++TEST_F(ColorburstConfigTest, EmptyValueFallsBack) {
++  EXPECT_EQ("us", RegionOf("region=\n"));
++  EXPECT_EQ("us", RegionOf("region=   \n"));
++}
++
++TEST_F(ColorburstConfigTest, RejectsSmuggledSwitches) {
++  // These strings become Chrome command-line arguments, and the OEM partition
++  // is writable by anyone holding the disk -- on Windows, now, with Notepad.
++  EXPECT_EQ("us", RegionOf("region=vn --disable-gaia-services\n"));
++  EXPECT_EQ("us", RegionOf("region=vn;rm -rf /\n"));
++  EXPECT_EQ("us", RegionOf("region=../../etc/passwd\n"));
++  EXPECT_EQ("us", RegionOf("region=vn\\n--foo\n"));
++}
++
++TEST_F(ColorburstConfigTest, RejectsAnOverlongValue) {
++  EXPECT_EQ("us", RegionOf("region=" + std::string(33, 'a') + "\n"));
 +  EXPECT_EQ(std::string(32, 'a'),
-+            RegionFor("region=" + std::string(32, 'a') + "\n"));
++            RegionOf("region=" + std::string(32, 'a') + "\n"));
 +}
 +
-+TEST_F(ColorburstRegionTest, RejectsBinaryGarbage) {
++TEST_F(ColorburstConfigTest, RejectsBinaryGarbage) {
 +  // A corrupted or half-written OEM partition.
-+  EXPECT_EQ("us", RegionFor(std::string("region=\x01\x02\xff\n", 11)));
++  EXPECT_EQ("us", RegionOf(std::string("region=\x01\x02\xff\n", 11)));
 +}
 +
- TEST_F(ChromeSetupTest, TestSerializedAshSwitches) {
-   using std::string_literals::operator""s;
-   cros_config_.SetString("/ui", "serialized-ash-switches",
++// --- booleans: the seam the next settings hang off ---------------------------
++
++TEST_F(ColorburstConfigTest, ParsesEveryReasonableSpellingOfYes) {
++  for (const char* yes : {"true", "yes", "on", "1", "TRUE", "Yes", "ON"}) {
++    const ColorburstConfig config = Parse(std::string("flag=") + yes);
++    EXPECT_TRUE(config.GetBool("flag", false)) << yes;
++  }
++}
++
++TEST_F(ColorburstConfigTest, ParsesEveryReasonableSpellingOfNo) {
++  for (const char* no : {"false", "no", "off", "0", "FALSE", "No", "OFF"}) {
++    const ColorburstConfig config = Parse(std::string("flag=") + no);
++    EXPECT_FALSE(config.GetBool("flag", true)) << no;
++  }
++}
++
++TEST_F(ColorburstConfigTest, BoolFallsBackBothWays) {
++  // A value nobody can interpret must not silently mean "off" -- the caller's
++  // default is the safe answer, whichever way it points.
++  EXPECT_TRUE(Parse("flag=maybe").GetBool("flag", true));
++  EXPECT_FALSE(Parse("flag=maybe").GetBool("flag", false));
++  EXPECT_TRUE(Parse("other=yes").GetBool("flag", true));
++}
++
++// --- raw access -------------------------------------------------------------
++
++TEST_F(ColorburstConfigTest, GetRawReturnsTheValueAsWritten) {
++  const ColorburstConfig config = Parse("Region= \"Vn\" \n");
++  EXPECT_EQ("Vn", config.GetRaw("region"));
++  EXPECT_EQ("Vn", config.GetRaw("REGION"));
++  EXPECT_EQ(std::nullopt, config.GetRaw("absent"));
++}
++
++}  // namespace login_manager

@@ -224,7 +224,7 @@ check "region vn input methods all exist (OOBE would crash otherwise)" $?
 #
 # 1. The patched session_manager is actually in the image. If the emerge above
 #    was skipped or a stale binpkg won, no region reaches Chrome at all.
-dbg /sbin/session_manager | grep -qa "/usr/share/oem/colorburst/variant"
+dbg /sbin/session_manager | grep -qa "/usr/share/oem/colorburst.txt"
 check "session_manager reads the OEM region marker" $?
 # 2. The fallback region exists in the image's own database. It is what an
 #    unrepacked image (empty OEM partition) boots as.
@@ -238,8 +238,11 @@ check "default region us present in cros-regions.json" $?
 #    bare grep fails a CORRECT image. (It did.)
 ! echo "$CDC" | grep -qE "^[[:space:]]*--cros-region"
 check "chrome_dev.conf does not pin a region" $?
-# 4. The OEM partition itself: present, and carrying a filesystem to write into.
-#    build_image leaves it empty, which is correct -- empty means "us".
+# 4. The OEM partition itself: present, and FAT rather than ext4. FAT is not a
+#    detail -- it is what lets someone preparing a USB stick open colorburst.txt
+#    in Notepad. An ext4 OEM partition here means the board's disk_layout.json
+#    override did not take, and every variant would then have to be made on a
+#    Linux box.
 python3 - "$IMG" <<'PYEOF'
 import struct, sys
 img = sys.argv[1]
@@ -257,11 +260,18 @@ with open(img, "rb") as f:
             break
     if start is None:
         print("    no OEM partition -- variants cannot be made"); sys.exit(1)
+    f.seek(start * 512)
+    boot = f.read(512)
     f.seek(start * 512 + 1024 + 56)
-    if struct.unpack("<H", f.read(2))[0] != 0xEF53:
-        print("    OEM partition has no ext filesystem"); sys.exit(1)
+    if f.read(2) == b"\x53\xef":
+        print("    OEM partition is ext4, not FAT -- the colorburst "
+              "disk_layout.json override did not take"); sys.exit(1)
+    if boot[510:512] != b"\x55\xaa":
+        print("    OEM partition has no FAT filesystem"); sys.exit(1)
+    if b"FAT" not in boot[54:90]:
+        print("    OEM partition boot sector does not name FAT"); sys.exit(1)
 PYEOF
-check "OEM partition present and formatted (variants can be repacked)" $?
+check "OEM partition is FAT (variants can be edited from Windows)" $?
 # Kernel built without VT consoles.
 KNAME=$(debugfs -c -R "ls /boot" "$IMG?offset=$OFF" 2>/dev/null |
         tr -s ' \n' '\n\n' | grep '^config-' | head -1)

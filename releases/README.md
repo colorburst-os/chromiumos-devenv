@@ -62,16 +62,18 @@ match.
 
 ## Language variants
 
-A version is **one build**. The USB images differ by one file on the OEM
-partition (#8), which says which region the device is:
+A version is **one build**. The USB images differ by one file,
+`colorburst.txt`, on the OEM partition (#8):
 
 ```bash
+release/make-variant.sh us colorburst-<ver>.bin colorburst-<ver>-en.bin
 release/make-variant.sh vn colorburst-<ver>.bin colorburst-<ver>-vi.bin
 ```
 
-The English image is the build itself — an empty OEM partition means region
-`us` — so only the other variants are repacked, and the repack touches ~300
-bytes of a 6.6 GB image. Nothing signed or verity-hashed is involved.
+Run it for **every** shipped image, English included: an explicit config beats
+an implicit default, and the Windows partition type has to be stamped either
+way. The repack touches a few hundred bytes of a 6.6 GB image and involves
+nothing signed or verity-hashed. Needs `mtools` and `e2fsprogs` on the host.
 
 This matters beyond saving build time:
 
@@ -81,6 +83,12 @@ This matters beyond saving build time:
   install and survives both OTA and powerwash, so a device stays in the
   language of the stick it was installed from — a powerwashed machine comes
   back up in Vietnamese, not English.
+- **It can be changed on Windows.** The partition is FAT32 typed as Microsoft
+  basic data, so a USB stick shows it in Explorer and `colorburst.txt` opens in
+  Notepad. Someone setting a laptop up for a relative can pick the language
+  without booting Linux. (Explorer shows it on removable media; once installed,
+  the internal disk's partition 8 is retyped from the board layout, so a
+  dual-boot Windows will not mount it.)
 
 A variant is not a fork of the release: `RELEASE.json` records one build, with
 the variant images as additional artifacts. Adding a language later costs one
