@@ -1,9 +1,18 @@
 # Building colorburst
 
-This repository is the workshop for **colorburst**, a ChromiumOS fork for
-Vietnamese users: Gaia-less local accounts, a native Vietnamese IME (UniKey
-engine, Telex/VNI/VIQR), no Google services, its own update server. If you
-just want to *use* colorburst, you're in the wrong repo — see
+This repository is the workshop for **colorburst**: ChromeOS Flex without the
+Google account. It boots the same kind of old x86 laptop, but the account is
+created on the device, there is no Gaia sign-in anywhere in the UI, no Google
+services, and updates come from its own signed update server.
+
+Language is not baked into the build. One image serves every region; a USB
+variant is made by rewriting 16 MiB of an already-built image, and a device
+keeps that language through installs, updates and powerwashes. Vietnamese is
+the first variant that got the full treatment — a native IME on the UniKey
+engine with Telex, VNI and VIQR — which is the proof that localizing this
+properly is a variant's worth of work, not a fork's.
+
+If you just want to *use* colorburst, you're in the wrong repo — see
 [`colorburst-os/colorburst`](https://github.com/colorburst-os/colorburst).
 If you want to build the OS yourself, read on.
 
@@ -81,8 +90,8 @@ building the OS image does not compile it.
 ## 2. Fetch Chromium and apply the patch series
 
 colorburst builds its own Chrome from a pinned Chromium base (r153,
-`831a446cd4`) plus a series of ~30 patches — local accounts, the Vietnamese
-IME, the de-Googling, branding. `chromium-patches/apply-all.sh` applies the
+`831a446cd4`) plus a series of ~30 patches — local accounts, the de-Googling,
+branding, and the Vietnamese IME. `chromium-patches/apply-all.sh` applies the
 whole series in the right order and leaves a clean tree:
 
 ```bash
@@ -131,6 +140,24 @@ flags that prevent this.
 The build prints the path; release images land in
 `chromiumos/src/build/images/colorburst/latest/`.
 
+**Pick a language, without building again.** The image you just built is the
+English one. The OOBE language, keyboard list and timezone all follow the
+device *region*, and the region is one line of text on the OEM partition —
+read at boot by session_manager and handed to Chrome as `--cros-region`:
+
+```bash
+release/make-variant.sh vn <image>.bin <image>-vi.bin    # Vietnamese
+release/make-variant.sh --show <image>.bin              # what is this image?
+```
+
+That partition carries neither a verity hash tree nor a signature, so this is
+a ~300-byte edit to a 6.6 GB image: no rebuild, no re-sign, and the kernel and
+rootfs stay byte-identical, which is why every variant shares one OTA payload.
+It is also the only partition that survives all three of install, OTA and
+powerwash — so a machine keeps the language of the stick it was installed
+from, permanently. Any region in the image's `cros-regions.json` works;
+`make-variant.sh` refuses the ones that aren't.
+
 **Run it in a VM.** This is where crosvm comes in, and it needs its own
 one-time setup (KVM, a desktop session, building the VM runner). All of it is
 in **[RUNNING-VM.md](RUNNING-VM.md)** — start there once you have an image.
@@ -159,8 +186,8 @@ disk it installs to.
 | `chromiumos/` | The source checkout, SDK chroot, and built images (bind-mounted into every container) |
 | `chromium/` | Chrome-side tooling: fetch, build, deploy-to-VM, image cutting — see [chromium/README.md](chromium/README.md) |
 | `chromium-patches/` | The patch series + vendored IME payloads, applied by `apply-all.sh` |
-| `platform2-patches/` | update_engine and region patches (device id, DLC fetch host, input methods) |
-| `release/` | Version cutting, payload generation, YubiKey signing, publishing — maintainer territory. See [releases/README.md](releases/README.md) for the versioning and branch scheme |
+| `platform2-patches/` | ChromeOS system-code patches (device id, DLC fetch host, region input methods, the OEM-partition region that drives language variants) |
+| `release/` | Version cutting, payload generation, language variants (`make-variant.sh`), YubiKey signing, publishing — maintainer territory. See [releases/README.md](releases/README.md) for the versioning and branch scheme |
 | `tools/` | `vm-instance.sh` (parallel VMs), `cdp.py` (drive Chrome via DevTools), `guest-type.py`, and friends |
 
 ## Keeping the forks fresh

@@ -102,6 +102,14 @@ cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/regions 2>/dev/null
 cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/regions
 [ \$? -eq 0 ] || exit 1
 
+# session_manager (login_manager), likewise from this checkout's platform2 tree:
+# it carries the patch that reads the region off the OEM partition and passes
+# --cros-region to Chrome. Without it the image has no region at all and every
+# variant boots English -- including the Vietnamese stick.
+cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/chromeos-login 2>/dev/null
+cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/chromeos-login
+[ \$? -eq 0 ] || exit 1
+
 # The base image, verity on. Same USE so image-build dependency resolution
 # matches the binpkgs we just made.
 cros_sdk --chrome-root=/chromium -- env \
@@ -191,6 +199,49 @@ if missing:
 sys.exit(0)
 PYEOF
 check "region vn input methods all exist (OOBE would crash otherwise)" $?
+# --- language variants -------------------------------------------------------
+# One build serves every language. The region is read at boot off the OEM
+# partition by session_manager and handed to Chrome as --cros-region, so
+# release/make-variant.sh can turn this image into any variant without a
+# rebuild. Three things have to hold for that, and all three are silent when
+# broken -- the image boots, just in the wrong language.
+#
+# 1. The patched session_manager is actually in the image. If the emerge above
+#    was skipped or a stale binpkg won, no region reaches Chrome at all.
+dbg /sbin/session_manager | grep -qa "/usr/share/oem/colorburst/variant"
+check "session_manager reads the OEM region marker" $?
+# 2. The fallback region exists in the image's own database. It is what an
+#    unrepacked image (empty OEM partition) boots as.
+echo "$REGIONS_JSON" | python3 -c 'import json,sys; sys.exit(0 if "us" in json.load(sys.stdin) else 1)'
+check "default region us present in cros-regions.json" $?
+# 3. Nothing pins the region behind session_manager's back. chrome_dev.conf is
+#    applied AFTER the OEM region on developer images, so a --cros-region line
+#    here would quietly override every variant.
+! echo "$CDC" | grep -q "cros-region"; check "chrome_dev.conf does not pin a region" $?
+# 4. The OEM partition itself: present, and carrying a filesystem to write into.
+#    build_image leaves it empty, which is correct -- empty means "us".
+python3 - "$IMG" <<'PYEOF'
+import struct, sys
+img = sys.argv[1]
+with open(img, "rb") as f:
+    f.seek(512); hdr = f.read(92)
+    lba = struct.unpack("<Q", hdr[72:80])[0]
+    n = struct.unpack("<I", hdr[80:84])[0]
+    sz = struct.unpack("<I", hdr[84:88])[0]
+    f.seek(lba * 512)
+    start = None
+    for _ in range(n):
+        e = f.read(sz)
+        if e[56:128].decode("utf-16-le").rstrip("\x00") == "OEM":
+            start = struct.unpack("<Q", e[32:40])[0]
+            break
+    if start is None:
+        print("    no OEM partition -- variants cannot be made"); sys.exit(1)
+    f.seek(start * 512 + 1024 + 56)
+    if struct.unpack("<H", f.read(2))[0] != 0xEF53:
+        print("    OEM partition has no ext filesystem"); sys.exit(1)
+PYEOF
+check "OEM partition present and formatted (variants can be repacked)" $?
 # Kernel built without VT consoles.
 KNAME=$(debugfs -c -R "ls /boot" "$IMG?offset=$OFF" 2>/dev/null |
         tr -s ' \n' '\n\n' | grep '^config-' | head -1)

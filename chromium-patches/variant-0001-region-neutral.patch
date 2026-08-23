@@ -1,0 +1,68 @@
+From 1a6cbd62a9ea8d5c8f7c7625490bcec227e799ae Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Sun, 23 Aug 2026 11:30:44 -0700
+Subject: [PATCH] Region-neutral build: the language is data, not a compiled-in
+ default
+
+ApplyColorburstLocalAccountDefaults() pinned --cros-region=vn, which made
+the OOBE language a property of the Chrome binary. Shipping a second
+language would have meant a second full Chrome build of an otherwise
+byte-identical OS -- hours of compile for one string.
+
+Move the region out of the binary. session_manager now reads it from the
+OEM partition and passes --cros-region explicitly
+(login_manager/chrome_setup.cc, AddColorburstRegionFlag), so one build
+serves every variant and a USB image's language is chosen by rewriting a
+16 MiB partition that carries neither verity nor a signature. That
+partition is the only one that survives install, OTA and powerwash
+alike, so a device also keeps the personality of the stick it came from.
+
+The fallback here stays, flipped vn -> us, for a Chrome started outside
+session_manager (ash by hand, a browser test) where nothing supplies a
+region. It matches what an unrepacked image gives you: English. Because
+session_manager always passes the switch and this is add-if-absent, the
+fallback never fires on a real boot -- which is also why the variant
+plumbing works on an image built before this patch.
+
+Vietnamese is now a variant (region=vn) rather than the default. Nothing
+Vietnamese is lost: the IME, the Telex/VNI/VIQR methods and the vi
+translations all live in the same image and switch on with the locale.
+---
+ chrome/app/chrome_main_delegate.cc | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
+index a8aa682ba2..a47b37cb56 100644
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -1119,12 +1119,21 @@ void ApplyColorburstLocalAccountDefaults() {
+       command_line->AppendSwitch(flag);
+     }
+   }
+-  // Vietnamese by default: cros-regions.json carries a "vn" entry, and
+-  // --cros-region overrides the VPD region, which generic hardware does not
+-  // have. Gives Vietnamese OOBE, Asia/Ho_Chi_Minh and the Vietnamese keyboard
+-  // layouts.
++  // The region is deliberately NOT set here any more. It used to be pinned to
++  // "vn", which made the language a property of the binary: shipping a second
++  // language meant a second 4-hour Chrome build of an otherwise identical OS.
++  //
++  // colorburst is region-neutral now. session_manager reads the region off the
++  // OEM partition and passes --cros-region (login_manager/chrome_setup.cc,
++  // AddColorburstRegionFlag), so one build serves every variant and a USB
++  // image's language is set by rewriting a 16 MiB unsigned partition.
++  //
++  // This fallback stays as the last line of defence for a Chrome started
++  // outside session_manager -- a developer running ash by hand, a browser test
++  // -- where nothing has supplied a region. English, matching an image whose
++  // OEM partition is empty.
+   if (!command_line->HasSwitch(ash::switches::kCrosRegion)) {
+-    command_line->AppendSwitchASCII(ash::switches::kCrosRegion, "vn");
++    command_line->AppendSwitchASCII(ash::switches::kCrosRegion, "us");
+   }
+ }
+ 
+-- 
+2.53.0
+

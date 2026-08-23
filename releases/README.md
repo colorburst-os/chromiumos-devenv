@@ -60,6 +60,33 @@ To rebuild a past release: check out the recorded chromium-os commit,
 `chromium/rebuild-release.sh`. The version comes from the tree, so it will
 match.
 
+## Language variants
+
+A version is **one build**. The USB images differ by one file on the OEM
+partition (#8), which says which region the device is:
+
+```bash
+release/make-variant.sh vn colorburst-<ver>.bin colorburst-<ver>-vi.bin
+```
+
+The English image is the build itself — an empty OEM partition means region
+`us` — so only the other variants are repacked, and the repack touches ~300
+bytes of a 6.6 GB image. Nothing signed or verity-hashed is involved.
+
+This matters beyond saving build time:
+
+- **One OTA stream.** Payloads carry KERN + ROOT only, which are identical
+  across variants, so every device takes the same signed payload.
+- **The personality sticks.** The OEM partition is copied USB → disk at
+  install and survives both OTA and powerwash, so a device stays in the
+  language of the stick it was installed from — a powerwashed machine comes
+  back up in Vietnamese, not English.
+
+A variant is not a fork of the release: `RELEASE.json` records one build, with
+the variant images as additional artifacts. Adding a language later costs one
+command, not a rebuild — provided the region exists in the image's
+`cros-regions.json`, which `make-variant.sh` checks before it writes anything.
+
 ## Branches
 
 ```
@@ -87,6 +114,7 @@ git add -A && git commit -m "Cut <version>"
 git -C chromiumos/src/overlays commit -am "Cut <version>"
 release/cut.sh record                      # BUILD-ID = the cut commit
 chromium/rebuild-release.sh                # builds exactly this version
+release/make-variant.sh vn <img>.bin <img>-vi.bin   # the -vi USB image
 release/sign-on-yubikey.sh chromiumos/ota-release/<version>
 release/publish.sh chromiumos/ota-release/<version>
 release/publish-dlc-images.sh

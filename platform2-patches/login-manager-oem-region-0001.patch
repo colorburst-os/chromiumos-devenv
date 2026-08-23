@@ -1,0 +1,242 @@
+diff --git a/login_manager/chrome_setup.cc b/login_manager/chrome_setup.cc
+index f15b7665fc..354d5d8378 100644
+--- a/login_manager/chrome_setup.cc
++++ b/login_manager/chrome_setup.cc
+@@ -12,6 +12,8 @@
+ #include <memory>
+ #include <optional>
+ #include <set>
++#include <string>
++#include <string_view>
+ #include <utility>
+ #include <vector>
+ 
+@@ -138,6 +140,57 @@ namespace {
+ // ChromiumCommandBuilder::ApplyUserConfig().
+ const char kChromeDevConfigPath[] = "/etc/chrome_dev.conf";
+ 
++// NOTE(colorburst fork): the image is region-neutral; the region is DATA, and
++// it lives on the OEM partition (#8, mounted read-only at /usr/share/oem).
++//
++// One build produces every USB variant. A variant is made by writing this one
++// file into the OEM partition of an already-built image -- no rebuild, no
++// re-sign, since that partition carries neither verity nor a signature. The
++// point of choosing partition 8 over anything else is that it is the only
++// place that survives all three of:
++//
++//   * install   -- chromeos-install copies it USB -> disk (chromeos-install.sh,
++//                  copy_partition "${PARTITION_NUM_OEM}")
++//   * OTA       -- update payloads carry KERN + ROOT only
++//   * powerwash -- clobber_state wipes STATE (#1)
++//
++// so a device keeps the personality of the stick it was installed from, for
++// good, and one OTA stream serves every variant.
++//
++// Format is key=value, one per line, '#' comments allowed:
++//
++//   region=vn
++//
++// Chrome turns the region into the OOBE language, the keyboard list and the
++// timezone via /usr/share/misc/cros-regions.json. An absent, unreadable or
++// malformed file means kColorburstDefaultRegion -- English, which is also what
++// a plain unrepacked image gives you.
++constexpr char kColorburstVariantPath[] = "/usr/share/oem/colorburst/variant";
++constexpr char kColorburstDefaultRegion[] = "us";
++constexpr char kColorburstRegionKey[] = "region=";
++// Region codes in cros-regions.json are lowercase and may carry '.' or '-'
++// ("us", "vn", "nordic", "latam-es-419"). Anything else does not name a region,
++// and this string goes onto Chrome's command line, so it is validated rather
++// than trusted: the OEM partition is writable by anyone holding the disk.
++constexpr char kColorburstRegionChars[] =
++    "abcdefghijklmnopqrstuvwxyz0123456789.-";
++constexpr size_t kColorburstRegionMaxLen = 32;
++// The real file is three short lines. The cap only bounds how much of a
++// corrupted 16 MiB partition gets read into memory before it is rejected.
++constexpr size_t kColorburstVariantMaxSize = 4096;
++
++// Passes the OEM partition's region to Chrome. This is add-always rather than
++// add-if-absent on purpose: it must beat the compiled-in fallback in
++// ChromeMainDelegate (chrome_main_delegate.cc), which is add-if-absent. It runs
++// before ApplyUserConfig(), so chrome_dev.conf can still override it on a
++// developer image.
++void AddColorburstRegionFlag(ChromiumCommandBuilder* builder) {
++  const std::string region =
++      GetColorburstRegion(base::FilePath(kColorburstVariantPath));
++  LOG(INFO) << "colorburst: region " << region;
++  builder->AddArg(base::StringPrintf("--cros-region=%s", region.c_str()));
++}
++
+ // Returns a base::FilePath corresponding to the DATA_DIR environment variable.
+ base::FilePath GetDataDir(ChromiumCommandBuilder* builder) {
+   return base::FilePath(builder->ReadEnvVar("DATA_DIR"));
+@@ -517,6 +570,37 @@ void AddEnterpriseFlags(ChromiumCommandBuilder* builder) {
+ 
+ }  // namespace
+ 
++// NOTE(colorburst fork): see kColorburstVariantPath above for what this file is
++// and why it lives on the OEM partition. Defined out here, and declared in the
++// header, so chrome_setup_test.cc can point it at a temp file -- the real path
++// is absolute and a unit test cannot write to it.
++std::string GetColorburstRegion(const base::FilePath& variant_path) {
++  std::string contents;
++  if (!base::ReadFileToStringWithMaxSize(variant_path, &contents,
++                                         kColorburstVariantMaxSize)) {
++    return kColorburstDefaultRegion;
++  }
++  for (std::string_view line :
++       base::SplitStringPiece(contents, "\n", base::TRIM_WHITESPACE,
++                              base::SPLIT_WANT_NONEMPTY)) {
++    if (base::StartsWith(line, "#") ||
++        !base::StartsWith(line, kColorburstRegionKey)) {
++      continue;
++    }
++    const std::string_view region =
++        line.substr(std::string_view(kColorburstRegionKey).size());
++    if (region.empty() || region.size() > kColorburstRegionMaxLen ||
++        region.find_first_not_of(kColorburstRegionChars) !=
++            std::string_view::npos) {
++      LOG(WARNING) << "colorburst: ignoring malformed region in "
++                   << variant_path;
++      return kColorburstDefaultRegion;
++    }
++    return std::string(region);
++  }
++  return kColorburstDefaultRegion;
++}
++
+ ChromeSetup::ChromeSetup(brillo::CrosConfigInterface& cros_config,
+                          segmentation::FeatureManagement& feature_management)
+     : cros_config_(cros_config), feature_management_(feature_management) {}
+@@ -537,6 +621,7 @@ std::optional<ChromeSetup::Result> ChromeSetup::Run() {
+   AddSerializedAshSwitches(&builder, &cros_config_);
+   AddSystemFlags(&builder, &cros_config_);
+   AddUiFlags(&builder, &cros_config_);
++  AddColorburstRegionFlag(&builder);
+   AddArcFlags(&builder, &disallowed_prefixes, &cros_config_);
+   AddArcDlcFlags(&builder, nullptr);
+   AddCrostiniFlags(&builder);
+diff --git a/login_manager/chrome_setup.h b/login_manager/chrome_setup.h
+index 4100dc84de..64fe229939 100644
+--- a/login_manager/chrome_setup.h
++++ b/login_manager/chrome_setup.h
+@@ -188,6 +188,16 @@ void SetUpSchedulerFlags(chromeos::ui::ChromiumCommandBuilder* builder,
+ void AddSerializedAshSwitches(chromeos::ui::ChromiumCommandBuilder* builder,
+                               brillo::CrosConfigInterface* cros_config);
+ 
++// NOTE(colorburst fork): reads the device region from a colorburst variant
++// marker -- a key=value file on the OEM partition, '#' comments allowed:
++//
++//     region=vn
++//
++// Returns "us" for an absent, unreadable or malformed file, which is what an
++// unrepacked image (empty OEM partition) is. Called by
++// AddColorburstRegionFlag and only present in the header for testing.
++std::string GetColorburstRegion(const base::FilePath& variant_path);
++
+ // Add flags to specify the wallpaper to use. This is called by
+ // PerformChromeSetup and only present in the header for testing.
+ // Flags are added to |builder|, and |path_exists| is called to test whether a
+diff --git a/login_manager/chrome_setup_test.cc b/login_manager/chrome_setup_test.cc
+index b1b3fb8b18..75583e6389 100644
+--- a/login_manager/chrome_setup_test.cc
++++ b/login_manager/chrome_setup_test.cc
+@@ -7,6 +7,8 @@
+ #include <memory>
+ #include <optional>
+ #include <set>
++#include <string>
++#include <string_view>
+ #include <utility>
+ 
+ #include <base/check.h>
+@@ -112,6 +114,90 @@ class ChromeSetupTest : public ::testing::Test {
+   segmentation::fake::FeatureManagementFake* fake_feature_management_;
+ };
+ 
++// NOTE(colorburst fork): the colorburst variant marker. This one file decides
++// which language a USB image boots in, and a wrong answer is silent -- the
++// machine comes up fine, just in the wrong language -- so the parser is pinned
++// down here rather than trusted.
++class ColorburstRegionTest : public ::testing::Test {
++ public:
++  void SetUp() override { CHECK(dir_.CreateUniqueTempDir()); }
++
++  // Writes |contents| to a marker file and returns the region parsed from it.
++  std::string RegionFor(std::string_view contents) {
++    const base::FilePath path = dir_.GetPath().Append("variant");
++    CHECK(base::WriteFile(path, contents));
++    return GetColorburstRegion(path);
++  }
++
++  base::ScopedTempDir dir_;
++};
++
++TEST_F(ColorburstRegionTest, MissingFileIsEnglish) {
++  // An image straight off the build, with an empty OEM partition.
++  EXPECT_EQ("us", GetColorburstRegion(dir_.GetPath().Append("nonexistent")));
++}
++
++TEST_F(ColorburstRegionTest, ReadsTheRegion) {
++  EXPECT_EQ("vn", RegionFor("region=vn\n"));
++}
++
++TEST_F(ColorburstRegionTest, IgnoresCommentsAndBlankLines) {
++  // The marker release/make-variant.sh actually writes.
++  EXPECT_EQ("vn",
++            RegionFor("# colorburst variant marker -- read at boot.\n"
++                      "# Survives install, OTA and powerwash.\n"
++                      "\n"
++                      "region=vn\n"));
++}
++
++TEST_F(ColorburstRegionTest, ToleratesNoTrailingNewline) {
++  EXPECT_EQ("vn", RegionFor("region=vn"));
++}
++
++TEST_F(ColorburstRegionTest, AcceptsCompoundRegionCodes) {
++  // cros-regions.json really has entries shaped like these; they must not be
++  // mistaken for malformed input.
++  EXPECT_EQ("latam-es-419", RegionFor("region=latam-es-419\n"));
++  EXPECT_EQ("br.abnt", RegionFor("region=br.abnt\n"));
++}
++
++TEST_F(ColorburstRegionTest, KeepsTheFirstRegionLine) {
++  EXPECT_EQ("vn", RegionFor("region=vn\nregion=us\n"));
++}
++
++TEST_F(ColorburstRegionTest, EmptyValueIsEnglish) {
++  EXPECT_EQ("us", RegionFor("region=\n"));
++}
++
++TEST_F(ColorburstRegionTest, EmptyFileIsEnglish) {
++  EXPECT_EQ("us", RegionFor(""));
++}
++
++TEST_F(ColorburstRegionTest, UnrelatedKeysAreIgnored) {
++  EXPECT_EQ("us", RegionFor("variant=vi\nnotes=hello\n"));
++}
++
++TEST_F(ColorburstRegionTest, RejectsSmuggledSwitches) {
++  // This string becomes a Chrome command-line argument, and the OEM partition
++  // is writable by anyone holding the disk. Falling back to the default beats
++  // passing it along.
++  EXPECT_EQ("us", RegionFor("region=vn --disable-gaia-services\n"));
++  EXPECT_EQ("us", RegionFor("region=vn;rm -rf /\n"));
++  EXPECT_EQ("us", RegionFor("region=../../etc/passwd\n"));
++  EXPECT_EQ("us", RegionFor("region=VN\n"));
++}
++
++TEST_F(ColorburstRegionTest, RejectsAnOverlongRegion) {
++  EXPECT_EQ("us", RegionFor("region=" + std::string(33, 'a') + "\n"));
++  EXPECT_EQ(std::string(32, 'a'),
++            RegionFor("region=" + std::string(32, 'a') + "\n"));
++}
++
++TEST_F(ColorburstRegionTest, RejectsBinaryGarbage) {
++  // A corrupted or half-written OEM partition.
++  EXPECT_EQ("us", RegionFor(std::string("region=\x01\x02\xff\n", 11)));
++}
++
+ TEST_F(ChromeSetupTest, TestSerializedAshSwitches) {
+   using std::string_literals::operator""s;
+   cros_config_.SetString("/ui", "serialized-ash-switches",

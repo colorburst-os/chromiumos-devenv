@@ -8,7 +8,7 @@
 # What it does, in order:
 #   1. Normalise the patch state of both patched trees to the committed series:
 #        - chromium-src : hard-reset to the pinned base, then apply-all.sh
-#        - platform2    : the update_engine device-id patch (idempotent)
+#        - platform2    : the whole platform2-patches series (idempotent)
 #   2. Nuke the board build cache for a clean build -- the colorburst sysroot
 #      (+ its binpkgs), the retired amd64-generic sysroot, and old images.
 #      KEEPS out/sdk (the host SDK, expensive to rebuild) and .cache/distfiles
@@ -45,7 +45,7 @@ log "chromium-src: hard-reset to pinned base $PINNED_BASE, then apply full serie
 git -C "$CHROME/src" reset --hard "$PINNED_BASE"
 chromium-patches/apply-all.sh "$CHROME/src"
 
-log "platform2: apply the whole patch series (device-id, DLC-URL, regions)"
+log "platform2: apply the whole patch series (device-id, DLC-URL, regions, OEM region)"
 # Run apply.sh unconditionally. It is safe to re-run -- each patch goes through
 # `git apply --3way` and falls back to `patch --forward`, both of which no-op on
 # an already-applied patch.
@@ -96,3 +96,8 @@ echo
 echo "Crostini DLCs (no YubiKey; verified against the on-device manifest hash --"
 echo "see release/DLC-RELEASE.md). Run once per release, before/with publishing:"
 echo "    release/publish-dlc-images.sh"
+echo
+echo "Language variants. The image above IS the English (region us) artifact;"
+echo "every other variant is a 16 MiB repack of it -- no rebuild, no re-sign,"
+echo "and they all share this one OTA payload:"
+echo "    release/make-variant.sh vn <image>.bin <image>-vi.bin"
