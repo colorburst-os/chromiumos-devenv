@@ -45,16 +45,19 @@ log "chromium-src: hard-reset to pinned base $PINNED_BASE, then apply full serie
 git -C "$CHROME/src" reset --hard "$PINNED_BASE"
 chromium-patches/apply-all.sh "$CHROME/src"
 
-log "platform2: update_engine patches (device-id + DLC-URL redirect)"
-# Guard on the NEWEST patch's marker: apply.sh applies the whole series in one
-# shot, so if the latest change (the DLC CDN redirect) is present, the earlier
-# device-id patch is too. Checking only the older marker would skip apply.sh on
-# a tree that has device-id but not the newer patch.
-if grep -q 'dl.colorburst.net' chromiumos/src/platform2/update_engine/cros/install_action.cc 2>/dev/null; then
-    echo "    already applied -- skipping"
-else
-    platform2-patches/apply.sh chromiumos/src/platform2
-fi
+log "platform2: apply the whole patch series (device-id, DLC-URL, regions)"
+# Run apply.sh unconditionally. It is safe to re-run -- each patch goes through
+# `git apply --3way` and falls back to `patch --forward`, both of which no-op on
+# an already-applied patch.
+#
+# This used to be guarded by grepping the tree for the NEWEST patch's marker and
+# skipping when found. That guard is a trap: the moment a patch is added to the
+# series, the marker names an older one, and any tree carrying that older patch
+# gets "already applied -- skipping" while the new patch is silently never
+# applied. That is exactly how it stood after the regions patch landed -- the
+# guard still checked the DLC marker, so a tree from before today would have
+# skipped the OOBE fix and rebuilt an image that crashes on first boot.
+platform2-patches/apply.sh chromiumos/src/platform2
 
 # (No chromite patch: the DLC factory-install approach was reverted -- Crostini
 # DLCs are served from the update server, so the stock chromite/dlc_allowlist.py
