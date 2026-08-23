@@ -110,6 +110,22 @@ cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/chromeos-login 2>/d
 cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/chromeos-login
 [ \$? -eq 0 ] || exit 1
 
+# ...and then its consumers, which is NOT optional. cros_workon masks the
+# stable chromeos-login ebuild in favour of -9999, and the packages that depend
+# on it do so with a subslot operator -- debugd wants
+# 'chromeos-base/chromeos-login:0/0.0.2-r6138='. Their existing BINPKGS still
+# name the stable subslot, and \`cros build-image\` resolves with --usepkgonly,
+# so it dies with
+#     All ebuilds that could satisfy \"chromeos-base/chromeos-login:0/0.0.2-r6138=\"
+#     ... have been masked
+# right at the end of the run, after everything else has been built. Rebuilding
+# the consumers regenerates their binpkgs against the -9999 subslot.
+# update_engine and regions above need no such thing: nothing depends on them
+# with a subslot operator. Found by running it.
+cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n \
+  chromeos-base/debugd chromeos-base/bootcomplete-login virtual/chromeos-interface
+[ \$? -eq 0 ] || exit 1
+
 # The base image, verity on. Same USE so image-build dependency resolution
 # matches the binpkgs we just made.
 cros_sdk --chrome-root=/chromium -- env \
@@ -217,7 +233,11 @@ check "default region us present in cros-regions.json" $?
 # 3. Nothing pins the region behind session_manager's back. chrome_dev.conf is
 #    applied AFTER the OEM region on developer images, so a --cros-region line
 #    here would quietly override every variant.
-! echo "$CDC" | grep -q "cros-region"; check "chrome_dev.conf does not pin a region" $?
+#    Anchored to a real flag line: the BSP's own comment block explains why the
+#    flag is absent and therefore contains the word "--cros-region" twice, so a
+#    bare grep fails a CORRECT image. (It did.)
+! echo "$CDC" | grep -qE "^[[:space:]]*--cros-region"
+check "chrome_dev.conf does not pin a region" $?
 # 4. The OEM partition itself: present, and carrying a filesystem to write into.
 #    build_image leaves it empty, which is correct -- empty means "us".
 python3 - "$IMG" <<'PYEOF'
