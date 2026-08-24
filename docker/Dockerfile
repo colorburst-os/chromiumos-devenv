@@ -37,8 +37,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # cros_sdk refuses to run as root; it wants a normal user with sudo.
 # Replace the stock ubuntu user so our user gets UID/GID 1000, matching the
 # host user that owns the bind-mounted source tree.
+ARG HOST_UID=1000
 RUN userdel -r ubuntu \
-    && useradd -m -u 1000 -s /bin/bash cros \
+    && useradd -m -u ${HOST_UID} -s /bin/bash cros \
     && echo 'cros ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/cros \
     && chmod 0440 /etc/sudoers.d/cros
 

@@ -38,8 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
+ARG HOST_UID=1000
 RUN userdel -r ubuntu 2>/dev/null; \
-    useradd -m -u 1000 -s /bin/bash cros \
+    useradd -m -u ${HOST_UID} -s /bin/bash cros \
     && echo 'cros ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/cros \
     && chmod 0440 /etc/sudoers.d/cros
 
