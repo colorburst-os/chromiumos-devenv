@@ -89,6 +89,14 @@ in_container chromium-nuke-cache "
     cd ~/chromiumos
     cros_sdk -- setup_board --board=${BOARD} --force
     cros_sdk -- sudo rm -rf /build/amd64-generic
+    # Chrome's build artefacts do NOT live in the board sysroot: the ebuild puts
+    # them in CHROME_CACHE_DIR=/var/cache/chromeos-chrome/chrome-src, in the
+    # chroot, which setup_board --force never touches. A killed Chrome compile
+    # leaves partial state there that survives the wipe, and the next build
+    # links against it -- 2026.32.11 failed exactly that way: every object
+    # compiled, no compile errors at all, and then the final link died on 20
+    # undefined symbols across unrelated ash subsystems.
+    cros_sdk -- sudo rm -rf /var/cache/chromeos-chrome/chrome-src
     rm -rf src/build/images/${BOARD}
     echo 'kept: out/sdk (host SDK cache), .cache/distfiles (downloads)'
     df -h /home/cros/chromiumos
@@ -109,7 +117,16 @@ if [ -n "$CHROME_LEFTOVERS" ]; then
     echo "recorded source. Refusing to continue." >&2
     exit 1
 fi
-log "board wipe verified: no chromeos-chrome installed or cached"
+# ...and Chrome's own cache, which is the one that is easy to forget because it
+# is not under out/build at all.
+CHROME_CACHE_LEFT=$(in_container chromium-check-chrome-cache \
+    "cros_sdk -- bash -c 'ls /var/cache/chromeos-chrome 2>/dev/null | wc -l'" 2>/dev/null | tr -dc '0-9')
+if [ -n "$CHROME_CACHE_LEFT" ] && [ "$CHROME_CACHE_LEFT" != 0 ]; then
+    echo "FATAL: /var/cache/chromeos-chrome still has content after the wipe." >&2
+    echo "Chrome would link against stale artefacts. Refusing to continue." >&2
+    exit 1
+fi
+log "board wipe verified: no chromeos-chrome installed, cached, or half-built"
 
 # --- 3. bootstrap the board (setup_board + full build-packages) -------------
 log "bootstrap board: setup_board + build-packages (builds local Chrome)"
