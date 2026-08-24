@@ -26,21 +26,3 @@ workon for update_engine).
   `m17n_manifest.json`, so no descriptor exists for that id; OOBE walks the
   region's list and hits a `NOTREACHED()` on the null descriptor, which is
   fatal in current Chromium. This is what crash-looped OOBE on 2026.32.9.
-- **login-manager-oem-region-0001.patch** — session_manager reads
-  `/usr/share/oem/colorburst.txt` from the OEM partition and passes
-  `--cros-region` to Chrome, defaulting to `us`. This is what makes one build
-  serve every variant: the OEM partition (#8) carries no verity and no
-  signature, so a variant is made by rewriting a few hundred bytes of an
-  already-built image (`release/make-variant.sh`), and it is the only partition
-  that survives install, OTA and powerwash alike — so a device keeps the
-  personality of the stick it was installed from.
-
-  The parser (`colorburst_config.{h,cc}`) is its own component because this
-  file is where behaviour beyond language will land. It is `key=value`, and it
-  is deliberately forgiving: the partition is FAT and the intended editor is
-  Notepad on Windows, so CRLF, a UTF-8 BOM, `;` comments, quotes and any
-  capitalisation all work. A line that will not parse is skipped and a value
-  that fails validation falls back to that setting's default — a device that
-  will not boot is far worse than one in the wrong language. Values are still
-  validated hard before reaching Chrome's command line, because anyone holding
-  the disk can now write that partition.

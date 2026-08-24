@@ -1,18 +1,24 @@
 #!/bin/bash
-# Turn a built colorburst image into a variant, without rebuilding it.
+# Turn a built colorburst image into a language variant, without rebuilding it.
 #
 #   release/make-variant.sh <region> <image.bin> [output.bin]
 #   release/make-variant.sh --show  <image.bin>
-#   release/make-variant.sh --file <config.txt> <image.bin> [output.bin]
+#   release/make-variant.sh --file <manifest.json> <image.bin> [output.bin]
 #
 #   release/make-variant.sh vn colorburst-2026.32.11.bin colorburst-2026.32.11-vi.bin
 #
-# colorburst ships ONE build. How a device behaves -- today its language, in
-# time more than that -- is a plain-text file on the OEM partition (#8), read at
-# boot by session_manager (login_manager/colorburst_config.cc).
+# colorburst ships ONE build. A variant is a single file on the OEM partition,
+# and that file is ChromeOS's own OEM customization manifest -- not a colorburst
+# invention:
 #
-# That partition is the whole trick. It is the only one that survives all three
-# of the things that would otherwise wipe a variant:
+#   /opt/oem/etc/startup_manifest.json   (ash/constants/ash_paths.cc)
+#
+# read by StartupCustomizationDocument, carrying initial_locale,
+# initial_timezone and keyboard_layout. The BSP symlinks /opt/oem to
+# /usr/share/oem, where the OEM partition mounts.
+#
+# The OEM partition is the whole trick. It is the only one that survives all
+# three of the things that would otherwise wipe a variant:
 #
 #   install   -- chromeos-install copies it USB -> disk
 #   OTA       -- update payloads carry KERN + ROOT only
@@ -20,27 +26,36 @@
 #
 # and it carries neither a dm-verity hash tree nor a signature, so writing to it
 # does not invalidate anything: no rebuild, no re-sign, a few hundred bytes
-# touched. A device therefore keeps the personality of the stick it was
-# installed from, for good, while every variant shares one OTA stream.
+# touched. A device keeps the personality of the stick it was installed from,
+# while every variant shares one OTA payload.
 #
-# The partition is FAT32 and this script also stamps it with the Microsoft
-# basic-data type GUID, which together are what make it visible in Windows
-# Explorer: someone preparing a stick can open colorburst.txt in Notepad and
-# change the language without booting anything. See the note on --show below
-# for what that does and does not extend to.
+# It is FAT32 stamped as Microsoft basic data, so a written USB stick shows the
+# partition in Windows Explorer -- someone preparing a machine for a relative
+# can look at, and if need be replace, the manifest without booting Linux.
 #
-# Run this for EVERY shipped image, including the English one -- an explicit
-# config beats an implicit default, and the type GUID has to be stamped either
-# way.
+# WHY A REGION NAME, WHEN THE MANIFEST HAS NO REGION FIELD
+# -------------------------------------------------------
+# The region is a lookup key here, at repack time -- not a mechanism on the
+# device. cros-regions.json inside the image already knows, for every region,
+# the right locale, timezone and hardware keyboard list; this script reads them
+# out of THAT image and writes them into the manifest. So "vn" stays the one
+# word a human has to know, and the device still ends up configured exactly the
+# way ChromeOS configures a Vietnamese device -- but through the upstream file,
+# with no --cros-region anywhere and no colorburst-specific parser on the
+# device.
+#
+# Run this for EVERY shipped image, English included: an explicit manifest beats
+# an implicit default, and the partition type has to be stamped either way.
 set -euo pipefail
 
-CONFIG_NAME="colorburst.txt"       # at the root of the OEM partition
+CONFIG_DIR="etc"                       # inside the OEM partition
+CONFIG_NAME="startup_manifest.json"
 # Microsoft basic data. Windows assigns a drive letter to this type and to no
 # other; the stock ChromeOS "data" type is Linux filesystem data
 # (0FC63DAF-...), which Explorer will not show however it is formatted.
 BASIC_DATA_GUID="EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
 
-usage() { sed -n '2,9p' "$0" | sed 's/^# \?//' >&2; exit 2; }
+usage() { sed -n '2,7p' "$0" | sed 's/^# \?//' >&2; exit 2; }
 die() { echo "error: $*" >&2; exit 1; }
 
 # --- locate a GPT partition by label -----------------------------------------
@@ -89,36 +104,28 @@ def header(f, lba):
 with open(img, "r+b") as f:
     primary = header(f, 1)
     alt_lba = struct.unpack("<Q", primary[32:40])[0]
-    headers = [(1, primary), (alt_lba, header(f, alt_lba))]
-
-    for lba, h in headers:
+    for lba, h in [(1, primary), (alt_lba, header(f, alt_lba))]:
         hsize = struct.unpack("<I", h[12:16])[0]
         entries_lba = struct.unpack("<Q", h[72:80])[0]
         count = struct.unpack("<I", h[80:84])[0]
         esize = struct.unpack("<I", h[84:88])[0]
         if not 1 <= num <= count:
             sys.exit("no partition %d" % num)
-
         f.seek(entries_lba * 512)
         entries = bytearray(f.read(count * esize))
         off = (num - 1) * esize
         entries[off:off + 16] = want.bytes_le
-
         f.seek(entries_lba * 512)
         f.write(entries)
-
-        # Entry-array CRC, then the header CRC over the zeroed-CRC header.
         struct.pack_into("<I", h, 88, binascii.crc32(bytes(entries)) & 0xFFFFFFFF)
         struct.pack_into("<I", h, 16, 0)
-        struct.pack_into("<I", h, 16,
-                         binascii.crc32(bytes(h[:hsize])) & 0xFFFFFFFF)
+        struct.pack_into("<I", h, 16, binascii.crc32(bytes(h[:hsize])) & 0xFFFFFFFF)
         f.seek(lba * 512)
         f.write(bytes(h))
 print("type of partition %d set to %s" % (num, want))
 PYEOF
 }
 
-# Prints the type GUID of partition <num>.
 get_part_type() {
     python3 - "$1" "$2" <<'PYEOF'
 import struct, sys, uuid
@@ -133,18 +140,18 @@ PYEOF
 }
 
 # --- the image's own region database ------------------------------------------
-# The best check available: the image knows which regions it supports, so a typo
-# cannot ship.
-known_regions() {
+# Read straight out of the image being repacked, so a variant can never be
+# configured with a region, locale or input method that this build does not
+# actually ship.
+regions_json() {
     local img="$1" start count
     read -r start count < <(part_by_label "$img" ROOT-A)
     debugfs -R "cat /usr/share/misc/cros-regions.json" \
-            "${img}?offset=$((start * 512))" 2>/dev/null |
-        python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))'
+            "${img}?offset=$((start * 512))" 2>/dev/null
 }
 
 [ $# -ge 2 ] || usage
-for t in debugfs mcopy mdir python3; do
+for t in debugfs mcopy mmd mdir python3; do
     command -v "$t" >/dev/null || die "$t not found (apt install e2fsprogs mtools)"
 done
 
@@ -164,7 +171,7 @@ with open(sys.argv[1], "rb") as f:
     ext = f.read(2)
 if ext == b"\x53\xef":
     sys.exit("the OEM partition is ext4. This image predates the FAT OEM "
-             "partition -- rebuild it, or use an older make-variant.sh.")
+             "partition -- rebuild it.")
 if boot[510:512] != b"\x55\xaa":
     sys.exit("the OEM partition has no FAT filesystem -- wrong image?")
 PYEOF
@@ -174,9 +181,9 @@ PYEOF
 if [ "$1" = "--show" ]; then
     IMG="$2"
     extract_oem "$IMG"
-    echo "--- $CONFIG_NAME"
-    mcopy -i "$TMP/oem.img" "::${CONFIG_NAME}" - 2>/dev/null ||
-        echo "(absent -- this image runs on defaults: region us)"
+    echo "--- ${CONFIG_DIR}/${CONFIG_NAME}"
+    mcopy -i "$TMP/oem.img" "::${CONFIG_DIR}/${CONFIG_NAME}" - 2>/dev/null ||
+        echo "(absent -- this image runs on Chrome's own defaults: en-US)"
     echo "--- partition 8"
     t=$(get_part_type "$IMG" 8)
     if [ "$t" = "$BASIC_DATA_GUID" ]; then
@@ -187,32 +194,54 @@ if [ "$1" = "--show" ]; then
     exit 0
 fi
 
-# --- argument handling --------------------------------------------------------
+# --- arguments ----------------------------------------------------------------
+SRC_MANIFEST=""
 if [ "$1" = "--file" ]; then
     [ $# -ge 3 ] || usage
-    SRC_CONFIG="$2"; SRC="$3"; DST="${4:-$3}"
-    [ -f "$SRC_CONFIG" ] || die "no such config file: $SRC_CONFIG"
-    REGION=$(sed -e 's/[;#].*//' -e 's/[[:space:]]//g' "$SRC_CONFIG" |
-             sed -n 's/^[Rr][Ee][Gg][Ii][Oo][Nn]=//p' | head -1 |
-             tr -d '"'"'" | tr 'A-Z' 'a-z')
-    [ -n "$REGION" ] || die "$SRC_CONFIG sets no region="
+    SRC_MANIFEST="$2"; SRC="$3"; DST="${4:-$3}"
+    [ -f "$SRC_MANIFEST" ] || die "no such manifest: $SRC_MANIFEST"
+    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$SRC_MANIFEST" ||
+        die "$SRC_MANIFEST is not valid JSON"
+    REGION="(from $SRC_MANIFEST)"
 else
     REGION="$1"; SRC="$2"; DST="${3:-$2}"
-    SRC_CONFIG=""
+    [[ "$REGION" =~ ^[a-z0-9][a-z0-9.-]*$ && ${#REGION} -le 32 ]] ||
+        die "bad region '$REGION': lowercase letters, digits, '.' and '-' only"
 fi
-
-[[ "$REGION" =~ ^[a-z0-9][a-z0-9.-]*$ && ${#REGION} -le 32 ]] ||
-    die "bad region '$REGION': lowercase letters, digits, '.' and '-' only"
 [ -f "$SRC" ] || die "no such image: $SRC"
 
-# Refuse a region this image cannot serve. Without this the device boots and
-# quietly falls back to English, which looks like the variant plumbing is broken
-# when in fact the region name was wrong.
-if ! known_regions "$SRC" | grep -qx "$REGION"; then
-    echo "region '$REGION' is not in this image's cros-regions.json." >&2
-    echo "Known regions: $(known_regions "$SRC" | tr '\n' ' ')" >&2
-    exit 1
+# --- derive the manifest from the image's region database ---------------------
+if [ -z "$SRC_MANIFEST" ]; then
+    regions_json "$SRC" > "$TMP/regions.json"
+    [ -s "$TMP/regions.json" ] || die "could not read cros-regions.json from $SRC"
+    python3 - "$TMP/regions.json" "$REGION" > "$TMP/$CONFIG_NAME" <<'PYEOF'
+import json, sys
+db = json.load(open(sys.argv[1]))
+region = sys.argv[2]
+if region not in db:
+    sys.exit("region %r is not in this image's cros-regions.json.\n"
+             "Known regions: %s" % (region, " ".join(sorted(db))))
+r = db[region]
+# initial_locale and keyboard_layout are comma-separated lists upstream:
+# StartupCustomizationDocument splits the locales, and
+# InputMethodUtil::UpdateHardwareLayoutCache splits the keyboards. Passing the
+# whole list keeps the OOBE language and keyboard pickers exactly as a region
+# would have set them.
+manifest = {
+    "version": "1.0",
+    "initial_locale": ",".join(r["locales"]),
+    "initial_timezone": r["time_zones"][0],
+    "keyboard_layout": ",".join(r["keyboards"]),
+}
+json.dump(manifest, sys.stdout, indent=2, ensure_ascii=False)
+sys.stdout.write("\n")
+PYEOF
+else
+    cp "$SRC_MANIFEST" "$TMP/$CONFIG_NAME"
 fi
+
+echo ">>> manifest for '$REGION':"
+sed 's/^/    /' "$TMP/$CONFIG_NAME"
 
 if [ "$DST" != "$SRC" ]; then
     echo ">>> copying $SRC -> $DST"
@@ -222,43 +251,23 @@ fi
 extract_oem "$DST"
 echo ">>> OEM partition: start=$OEM_START sectors=$OEM_COUNT ($((OEM_COUNT / 2048)) MiB)"
 
-# --- the config ---------------------------------------------------------------
-# CRLF, because this file exists to be opened in Notepad. Older Notepad shows a
-# LF-only file as one run-on line.
-if [ -n "$SRC_CONFIG" ]; then
-    sed 's/\r*$/\r/' "$SRC_CONFIG" > "$TMP/$CONFIG_NAME"
-else
-    sed 's/$/\r/' > "$TMP/$CONFIG_NAME" <<EOF
-# colorburst configuration
-#
-# This file decides how this computer behaves. It is read once at every boot,
-# and it survives updates and a full reset -- so whatever you set here is what
-# this machine stays.
-#
-# region: the language, keyboard and clock the computer starts with.
-#         "us" = English, "vn" = Tiếng Việt.
-#         The user can still change the language afterwards; this is only what
-#         a fresh or freshly-reset machine starts as.
+# Idempotent: re-running with another region replaces the manifest.
+mmd  -i "$TMP/oem.img" "::${CONFIG_DIR}" 2>/dev/null || true
+mdel -i "$TMP/oem.img" "::${CONFIG_DIR}/${CONFIG_NAME}" 2>/dev/null || true
+mcopy -i "$TMP/oem.img" "$TMP/$CONFIG_NAME" "::${CONFIG_DIR}/${CONFIG_NAME}"
 
-region=$REGION
-EOF
-fi
-
-mdel -i "$TMP/oem.img" "::${CONFIG_NAME}" 2>/dev/null || true
-mcopy -i "$TMP/oem.img" "$TMP/$CONFIG_NAME" "::${CONFIG_NAME}"
-
-# --- verify the filesystem before putting it back -----------------------------
-got=$(mcopy -i "$TMP/oem.img" "::${CONFIG_NAME}" - 2>/dev/null |
-      tr -d '\r' | sed -n 's/^[Rr]egion=//p' | head -1)
-[ "$got" = "$REGION" ] ||
-    die "verification failed: the config reads region '$got', expected '$REGION'"
-fsck.vfat -n "$TMP/oem.img" >"$TMP/fsck.log" 2>&1 ||
+# --- verify before writing back -----------------------------------------------
+mcopy -i "$TMP/oem.img" "::${CONFIG_DIR}/${CONFIG_NAME}" - 2>/dev/null \
+    > "$TMP/readback.json" || die "cannot read the manifest back out of the image"
+cmp -s "$TMP/$CONFIG_NAME" "$TMP/readback.json" ||
+    die "the manifest read back differs from what was written"
+fsck.vfat -n "$TMP/oem.img" > "$TMP/fsck.log" 2>&1 ||
     { cat "$TMP/fsck.log" >&2
       die "the rewritten OEM filesystem does not fsck clean -- refusing to ship it"; }
 
 dd if="$TMP/oem.img" of="$DST" bs=512 seek="$OEM_START" conv=notrunc status=none
 
-# --- make it visible to Windows ----------------------------------------------
+# --- make it visible to Windows -----------------------------------------------
 if [ "$(get_part_type "$DST" 8)" != "$BASIC_DATA_GUID" ]; then
     echo ">>> stamping partition 8 as Microsoft basic data (for Windows)"
     set_part_type "$DST" 8 "$BASIC_DATA_GUID"
@@ -266,15 +275,15 @@ fi
 sfdisk -J "$DST" >/dev/null 2>&1 ||
     die "the partition table no longer parses after the type change -- STOP"
 
-# --- verify again, in place ---------------------------------------------------
+# --- verify again, in place ----------------------------------------------------
 extract_oem "$DST"
-final=$(mcopy -i "$TMP/oem.img" "::${CONFIG_NAME}" - 2>/dev/null |
-        tr -d '\r' | sed -n 's/^[Rr]egion=//p' | head -1)
-[ "$final" = "$REGION" ] ||
-    die "wrote the partition but the image does not read it back -- STOP"
+mcopy -i "$TMP/oem.img" "::${CONFIG_DIR}/${CONFIG_NAME}" - 2>/dev/null \
+    > "$TMP/final.json" || die "wrote the partition but the image will not read it back"
+cmp -s "$TMP/$CONFIG_NAME" "$TMP/final.json" ||
+    die "wrote the partition but the image reads back something else -- STOP"
 [ "$(get_part_type "$DST" 8)" = "$BASIC_DATA_GUID" ] ||
     die "the partition type did not take -- STOP"
 
-echo ">>> $DST is now region '$REGION'"
+echo ">>> $DST carries the '$REGION' manifest"
 echo "    Everything outside the OEM partition is byte-identical to the input:"
 echo "    same kernel, same rootfs, same verity hash, same OTA payload."

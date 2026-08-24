@@ -102,30 +102,6 @@ cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/regions 2>/dev/null
 cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/regions
 [ \$? -eq 0 ] || exit 1
 
-# session_manager (login_manager), likewise from this checkout's platform2 tree:
-# it carries the patch that reads the region off the OEM partition and passes
-# --cros-region to Chrome. Without it the image has no region at all and every
-# variant boots English -- including the Vietnamese stick.
-cros_sdk -- cros_workon --board=${BOARD} start chromeos-base/chromeos-login 2>/dev/null
-cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n chromeos-base/chromeos-login
-[ \$? -eq 0 ] || exit 1
-
-# ...and then its consumers, which is NOT optional. cros_workon masks the
-# stable chromeos-login ebuild in favour of -9999, and the packages that depend
-# on it do so with a subslot operator -- debugd wants
-# 'chromeos-base/chromeos-login:0/0.0.2-r6138='. Their existing BINPKGS still
-# name the stable subslot, and \`cros build-image\` resolves with --usepkgonly,
-# so it dies with
-#     All ebuilds that could satisfy \"chromeos-base/chromeos-login:0/0.0.2-r6138=\"
-#     ... have been masked
-# right at the end of the run, after everything else has been built. Rebuilding
-# the consumers regenerates their binpkgs against the -9999 subslot.
-# update_engine and regions above need no such thing: nothing depends on them
-# with a subslot operator. Found by running it.
-cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n \
-  chromeos-base/debugd chromeos-base/bootcomplete-login virtual/chromeos-interface
-[ \$? -eq 0 ] || exit 1
-
 # The base image, verity on. Same USE so image-build dependency resolution
 # matches the binpkgs we just made.
 cros_sdk --chrome-root=/chromium -- env \
@@ -216,31 +192,42 @@ sys.exit(0)
 PYEOF
 check "region vn input methods all exist (OOBE would crash otherwise)" $?
 # --- language variants -------------------------------------------------------
-# One build serves every language. The region is read at boot off the OEM
-# partition by session_manager and handed to Chrome as --cros-region, so
-# release/make-variant.sh can turn this image into any variant without a
-# rebuild. Three things have to hold for that, and all three are silent when
-# broken -- the image boots, just in the wrong language.
+# One build serves every language. A variant is ChromeOS's own OEM
+# customization manifest, /opt/oem/etc/startup_manifest.json, written onto the
+# OEM partition by release/make-variant.sh. Three things have to hold, and all
+# three are silent when broken -- the image boots, just in English.
 #
-# 1. The patched session_manager is actually in the image. If the emerge above
-#    was skipped or a stale binpkg won, no region reaches Chrome at all.
-dbg /sbin/session_manager | grep -qa "/usr/share/oem/colorburst.txt"
-check "session_manager reads the OEM region marker" $?
-# 2. The fallback region exists in the image's own database. It is what an
-#    unrepacked image (empty OEM partition) boots as.
-echo "$REGIONS_JSON" | python3 -c 'import json,sys; sys.exit(0 if "us" in json.load(sys.stdin) else 1)'
-check "default region us present in cros-regions.json" $?
-# 3. Nothing pins the region behind session_manager's back. chrome_dev.conf is
-#    applied AFTER the OEM region on developer images, so a --cros-region line
-#    here would quietly override every variant.
-#    Anchored to a real flag line: the BSP's own comment block explains why the
-#    flag is absent and therefore contains the word "--cros-region" twice, so a
-#    bare grep fails a CORRECT image. (It did.)
+# 1. /opt/oem resolves. Chrome looks under /opt/oem; the OEM partition mounts at
+#    /usr/share/oem; the BSP symlinks one to the other. Without it the manifest
+#    is simply never read and every variant is English.
+[ "$(debugfs -c -R "stat /opt/oem" "$IMG?offset=$OFF" 2>/dev/null |
+     sed -n 's/^Fast link dest: "\(.*\)"$/\1/p')" = "/usr/share/oem" ]
+check "/opt/oem -> /usr/share/oem (Chrome can find the manifest)" $?
+# 2. The regions make-variant.sh will be asked for exist in the image's own
+#    database. It reads locale/timezone/keyboards out of THIS file to build the
+#    manifest, so a region missing here cannot be shipped as a variant.
+echo "$REGIONS_JSON" | python3 -c '
+import json, sys
+db = json.load(sys.stdin)
+missing = [r for r in ("us", "vn") if r not in db]
+if missing:
+    print("    cros-regions.json is missing:", missing)
+    sys.exit(1)'
+check "regions us + vn present in cros-regions.json" $?
+# 3. NOTHING sets a region. A region populates the initial_locale /
+#    initial_timezone / keyboard_layout statistics, and
+#    StartupCustomizationDocument applies statistics OVER the manifest
+#    unconditionally -- so a single --cros-region line anywhere silently beats
+#    every variant file we ship. chrome_dev.conf is the one place left that
+#    could reintroduce it (it is applied on developer images).
+#    Anchored to a real flag line: the BSP's comment block explains why the flag
+#    is absent and therefore contains the word "--cros-region" itself, so a bare
+#    grep fails a CORRECT image. (It did.)
 ! echo "$CDC" | grep -qE "^[[:space:]]*--cros-region"
 check "chrome_dev.conf does not pin a region" $?
 # 4. The OEM partition itself: present, and FAT rather than ext4. FAT is not a
-#    detail -- it is what lets someone preparing a USB stick open colorburst.txt
-#    in Notepad. An ext4 OEM partition here means the board's disk_layout.json
+#    detail -- it is what lets someone preparing a USB stick read the manifest
+#    from Windows. An ext4 OEM partition here means the board's disk_layout.json
 #    override did not take, and every variant would then have to be made on a
 #    Linux box.
 python3 - "$IMG" <<'PYEOF'

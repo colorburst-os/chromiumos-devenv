@@ -50,7 +50,7 @@ The full series, in the order `apply-all.sh` applies it:
 | 31 | `telex-i18n-underline-0001.patch` | finishes the Vietnamese options-page translations; composition underline off by default |
 | 32 | `ime-vni-and-methods-0001.patch` | adds VNI and VIQR as selectable methods, routed through the same UniKey engine |
 | 33 | `degoogle-0006-remove-ai-and-you-and-google.patch` | removes the "AI in Chrome" page and the "You and Google" section from Settings |
-| 34 | `variant-0001-region-neutral.patch` | stops pinning the region in the binary; session_manager supplies it from the OEM partition, so one build serves every language |
+| 34 | `variant-0001-region-neutral.patch` | stops pinning a region in the binary. Locale/timezone/keyboard come from ChromeOS's own OEM customization manifest on the OEM partition instead, so one build serves every language |
 
 **On the Vietnamese patches.** There are a lot of them, and none of them make
 this a Vietnamese build. Every one is locale-scoped — a `vi` `.xtb` translation,
@@ -58,7 +58,7 @@ a recommendation that fires for a Vietnamese profile, an input method that
 appears once you pick Vietnamese. The English strings sit in the `.grd` files
 where upstream keeps them, and the image ships Chromium's full locale set. A
 colorburst image is English by default (patch 34) and becomes Vietnamese when
-its region says so — a repack, not a build (`release/make-variant.sh`). Read
+its OEM manifest says so — a repack, not a build (`release/make-variant.sh`). Read
 them as the worked example of what localizing this fork properly costs, not as
 a fork of it.
 

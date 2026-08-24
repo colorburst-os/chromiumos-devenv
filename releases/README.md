@@ -62,38 +62,37 @@ match.
 
 ## Language variants
 
-A version is **one build**. The USB images differ by one file,
-`colorburst.txt`, on the OEM partition (#8):
+A version is **one build**. The USB images differ by one file on the OEM
+partition (#8) — ChromeOS's own OEM customization manifest,
+`/opt/oem/etc/startup_manifest.json`:
 
 ```bash
 release/make-variant.sh us colorburst-<ver>.bin colorburst-<ver>-en.bin
 release/make-variant.sh vn colorburst-<ver>.bin colorburst-<ver>-vi.bin
 ```
 
-Run it for **every** shipped image, English included: an explicit config beats
-an implicit default, and the Windows partition type has to be stamped either
-way. The repack touches a few hundred bytes of a 6.6 GB image and involves
-nothing signed or verity-hashed. Needs `mtools` and `e2fsprogs` on the host.
+Run it for **every** shipped image, English included: an explicit manifest
+beats an implicit default, and the Windows partition type has to be stamped
+either way. The repack touches a few hundred bytes of a 6.6 GB image and
+involves nothing signed or verity-hashed. Needs `mtools` and `e2fsprogs`.
 
 This matters beyond saving build time:
 
-- **One OTA stream.** Payloads carry KERN + ROOT only, which are identical
-  across variants, so every device takes the same signed payload.
+- **One OTA stream.** Payloads carry KERN + ROOT only, identical across
+  variants, so every device takes the same signed payload.
 - **The personality sticks.** The OEM partition is copied USB → disk at
-  install and survives both OTA and powerwash, so a device stays in the
-  language of the stick it was installed from — a powerwashed machine comes
+  install and survives both OTA and powerwash, so a powerwashed machine comes
   back up in Vietnamese, not English.
-- **It can be changed on Windows.** The partition is FAT32 typed as Microsoft
-  basic data, so a USB stick shows it in Explorer and `colorburst.txt` opens in
-  Notepad. Someone setting a laptop up for a relative can pick the language
-  without booting Linux. (Explorer shows it on removable media; once installed,
-  the internal disk's partition 8 is retyped from the board layout, so a
-  dual-boot Windows will not mount it.)
+- **It can be changed on Windows.** FAT32 typed as Microsoft basic data, so a
+  USB stick shows the partition in Explorer. (Removable media only; once
+  installed, the internal disk's partition 8 is retyped from the board layout.)
+- **No colorburst mechanism on the device.** The manifest is upstream's, read
+  by `StartupCustomizationDocument`. The region name is only a lookup key at
+  repack time: `make-variant.sh` reads that region's locale, timezone and
+  keyboard list out of the image's own `cros-regions.json`.
 
 A variant is not a fork of the release: `RELEASE.json` records one build, with
-the variant images as additional artifacts. Adding a language later costs one
-command, not a rebuild — provided the region exists in the image's
-`cros-regions.json`, which `make-variant.sh` checks before it writes anything.
+the variant images as additional artifacts.
 
 ## Branches
 
@@ -122,7 +121,8 @@ git add -A && git commit -m "Cut <version>"
 git -C chromiumos/src/overlays commit -am "Cut <version>"
 release/cut.sh record                      # BUILD-ID = the cut commit
 chromium/rebuild-release.sh                # builds exactly this version
-release/make-variant.sh vn <img>.bin <img>-vi.bin   # the -vi USB image
+release/make-variant.sh us <img>.bin <img>-en.bin   # run for EVERY variant
+release/make-variant.sh vn <img>.bin <img>-vi.bin
 release/sign-on-yubikey.sh chromiumos/ota-release/<version>
 release/publish.sh chromiumos/ota-release/<version>
 release/publish-dlc-images.sh

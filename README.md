@@ -5,9 +5,10 @@ Google account. It boots the same kind of old x86 laptop, but the account is
 created on the device, there is no Gaia sign-in anywhere in the UI, no Google
 services, and updates come from its own signed update server.
 
-Language is not baked into the build. One image serves every region; a USB
-variant is made by rewriting 16 MiB of an already-built image, and a device
-keeps that language through installs, updates and powerwashes. Vietnamese is
+Language is not baked into the build. One image serves every region: a USB
+variant is made by writing ChromeOS's own OEM customization manifest onto an
+already-built image, and a device keeps that language through installs, updates
+and powerwashes. Vietnamese is
 the first variant that got the full treatment — a native IME on the UniKey
 engine with Telex, VNI and VIQR — which is the proof that localizing this
 properly is a variant's worth of work, not a fork's.
@@ -140,9 +141,11 @@ flags that prevent this.
 The build prints the path; release images land in
 `chromiumos/src/build/images/colorburst/latest/`.
 
-**Pick a language, without building again.** How a device behaves — today its
-language, in time more than that — is a plain-text file, `colorburst.txt`, on
-the OEM partition, read at boot by session_manager:
+**Pick a language, without building again.** A variant is one file on the OEM
+partition — and it is ChromeOS's own OEM customization manifest, not something
+colorburst invented: `/opt/oem/etc/startup_manifest.json`, read by
+`StartupCustomizationDocument`, carrying `initial_locale`, `initial_timezone`
+and `keyboard_layout`.
 
 ```bash
 release/make-variant.sh vn <image>.bin <image>-vi.bin    # Vietnamese
@@ -152,26 +155,29 @@ release/make-variant.sh --show <image>.bin               # what is this image?
 Needs `mtools` and `e2fsprogs` on the host (`sudo apt install mtools
 e2fsprogs`); no root, no loop devices.
 
-That partition carries neither a verity hash tree nor a signature, so this is
-a few hundred bytes of edit to a 6.6 GB image: no rebuild, no re-sign, and the
-kernel and rootfs stay byte-identical, which is why every variant shares one
-OTA payload. It is also the only partition that survives all three of install,
-OTA and powerwash — so a machine keeps the language of the stick it was
-installed from, permanently.
+The region name is a lookup key at repack time, not a mechanism on the device.
+`make-variant.sh` reads the locale, timezone and hardware keyboard list for
+that region out of the image's own `cros-regions.json` and writes them into the
+manifest — so `vn` stays the one word you have to know, the device ends up
+configured the way ChromeOS configures a Vietnamese device, and nothing sets
+`--cros-region` at runtime.
 
-It is **FAT32, typed as Microsoft basic data**, which means that after writing
-the image to a USB stick, Windows shows the partition in Explorer and the file
-opens in Notepad. That is the point: the person setting up a laptop for
-somebody else can change the language without booting Linux. `make-variant.sh`
-writes CRLF line endings, and the parser tolerates a UTF-8 BOM, `;` comments,
-quotes and any capitalisation, because Notepad produces all of those.
+That partition carries neither a verity hash tree nor a signature, so this is a
+few hundred bytes of edit to a 6.6 GB image: no rebuild, no re-sign, kernel and
+rootfs byte-identical, which is why every variant shares one OTA payload. It is
+also the only partition that survives all three of install, OTA and powerwash —
+so a machine keeps the language of the stick it was installed from.
 
-Two limits worth knowing. Windows shows the partition on **removable** media;
-once installed to an internal disk the partition is retyped by the installer
-from the board's layout, so a dual-boot Windows will not mount it. And any
-region in the image's `cros-regions.json` works — `make-variant.sh` refuses
-the ones that aren't, rather than letting a typo ship as a silent fallback to
-English.
+It is **FAT32, typed as Microsoft basic data**, so after writing the image to a
+USB stick Windows shows the partition in Explorer.
+
+Two limits worth knowing. Windows shows it on **removable** media; once
+installed to an internal disk the partition is retyped by the installer from
+the board layout, so a dual-boot Windows will not mount it. And **nothing may
+set a region** — a region populates the same statistics from `cros-regions.json`
+and `StartupCustomizationDocument` applies statistics *over* the manifest, so a
+single `--cros-region` anywhere silently beats every variant file. A release
+gate checks for that.
 
 **Run it in a VM.** This is where crosvm comes in, and it needs its own
 one-time setup (KVM, a desktop session, building the VM runner). All of it is
@@ -201,7 +207,7 @@ disk it installs to.
 | `chromiumos/` | The source checkout, SDK chroot, and built images (bind-mounted into every container) |
 | `chromium/` | Chrome-side tooling: fetch, build, deploy-to-VM, image cutting — see [chromium/README.md](chromium/README.md) |
 | `chromium-patches/` | The patch series + vendored IME payloads, applied by `apply-all.sh` |
-| `platform2-patches/` | ChromeOS system-code patches (device id, DLC fetch host, region input methods, the OEM-partition region that drives language variants) |
+| `platform2-patches/` | ChromeOS system-code patches (device id, DLC fetch host, region input methods) |
 | `release/` | Version cutting, payload generation, language variants (`make-variant.sh`), YubiKey signing, publishing — maintainer territory. See [releases/README.md](releases/README.md) for the versioning and branch scheme |
 | `tools/` | `vm-instance.sh` (parallel VMs), `cdp.py` (drive Chrome via DevTools), `guest-type.py`, and friends |
 

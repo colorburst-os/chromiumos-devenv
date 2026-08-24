@@ -45,7 +45,7 @@ log "chromium-src: hard-reset to pinned base $PINNED_BASE, then apply full serie
 git -C "$CHROME/src" reset --hard "$PINNED_BASE"
 chromium-patches/apply-all.sh "$CHROME/src"
 
-log "platform2: apply the whole patch series (device-id, DLC-URL, regions, OEM region)"
+log "platform2: apply the whole patch series (device-id, DLC-URL, regions)"
 # Run apply.sh unconditionally. It is safe to re-run -- each patch goes through
 # `git apply --3way` and falls back to `patch --forward`, both of which no-op on
 # an already-applied patch.
@@ -129,7 +129,8 @@ echo "Crostini DLCs (no YubiKey; verified against the on-device manifest hash --
 echo "see release/DLC-RELEASE.md). Run once per release, before/with publishing:"
 echo "    release/publish-dlc-images.sh"
 echo
-echo "Language variants. The image above IS the English (region us) artifact;"
-echo "every other variant is a 16 MiB repack of it -- no rebuild, no re-sign,"
-echo "and they all share this one OTA payload:"
+echo "Language variants. Each is ChromeOS's own OEM customization manifest"
+echo "written onto the OEM partition -- no rebuild, no re-sign, and every"
+echo "variant shares this one OTA payload. Run it for EVERY shipped image:"
+echo "    release/make-variant.sh us <image>.bin <image>-en.bin"
 echo "    release/make-variant.sh vn <image>.bin <image>-vi.bin"
