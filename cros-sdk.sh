@@ -69,6 +69,15 @@ fi
 
 # --privileged: cros_sdk needs to create its chroot with bind mounts, and
 # image building needs loop devices.
+GPU_FLAGS=()
+if command -v nvidia-smi &>/dev/null && [ "${GUI:-0}" = 1 ]; then
+    GPU_FLAGS=(
+        --runtime=nvidia
+        -e NVIDIA_VISIBLE_DEVICES=all
+        -e NVIDIA_DRIVER_CAPABILITIES=all
+    )
+fi
+
 exec docker run --rm "${TTY_FLAGS[@]}" \
     --privileged \
     "${NAME_FLAGS[@]}" \
@@ -76,6 +85,7 @@ exec docker run --rm "${TTY_FLAGS[@]}" \
     "${NET_FLAGS[@]}" \
     "${PORT_FLAGS[@]}" \
     "${GUI_FLAGS[@]}" \
+    "${GPU_FLAGS[@]}" \
     --hostname cros-build \
     -v "$SRC":/home/cros/chromiumos \
     -v /dev:/dev \
