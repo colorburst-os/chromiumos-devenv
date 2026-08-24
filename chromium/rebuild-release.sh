@@ -64,15 +64,47 @@ platform2-patches/apply.sh chromiumos/src/platform2
 # and upstream termina-dlc ebuilds are used unchanged.)
 
 # --- 2. nuke the board build cache (clean build) ----------------------------
-# Done inside the container so root-owned build artefacts can be removed.
+# `setup_board --force`, NOT `rm -rf out/build/${BOARD}`.
+#
+# The sysroot is full of root-owned files, and inside the chroot parts of it
+# (var/tmp/portage) are live mount points. A plain rm from the container runs as
+# uid 1000 and dies with "Operation not permitted" / "Permission denied" on
+# exactly those paths -- and because `rm -rf` keeps going and the whole step was
+# unchecked, the build sailed on with the sysroot still standing. Portage then
+# saw chromeos-chrome already installed at the same version and skipped it, so
+# the "clean" release image carried a Chrome built from an EARLIER source tree.
+# 2026.32.11 was staged that way once: 30 minutes end to end, every gate green,
+# and not reproducible from its own recorded manifest.
+#
+# --force is chromite's own board-root recreation: it knows about the mounts and
+# runs with the privileges to remove them.
 log "nuke board build cache (keep out/sdk + .cache/distfiles)"
 in_container chromium-nuke-cache "
-    set -x
+    set -ex
     cd ~/chromiumos
-    rm -rf out/build/${BOARD} out/build/amd64-generic src/build/images/${BOARD}
+    cros_sdk -- setup_board --board=${BOARD} --force
+    cros_sdk -- sudo rm -rf /build/${BOARD}/packages /build/amd64-generic
+    rm -rf src/build/images/${BOARD}
     echo 'kept: out/sdk (host SDK cache), .cache/distfiles (downloads)'
     df -h /home/cros/chromiumos
 "
+
+# Assert it actually happened, from the host, where the sysroot is plainly
+# visible. A wipe that quietly did nothing is the whole failure mode above, and
+# chromeos-chrome is the package it matters most for: bootstrap-board.sh is the
+# only place our Chromium is compiled, and it only compiles when portage cannot
+# find chromeos-chrome already installed or as a binpkg.
+CHROME_LEFTOVERS=$(ls -d "chromiumos/out/build/${BOARD}/var/db/pkg/chromeos-base/chromeos-chrome-"* \
+                          "chromiumos/out/build/${BOARD}/packages/chromeos-base/chromeos-chrome-"* \
+                   2>/dev/null || true)
+if [ -n "$CHROME_LEFTOVERS" ]; then
+    echo "FATAL: the board wipe did not remove chromeos-chrome:" >&2
+    echo "$CHROME_LEFTOVERS" | sed 's/^/    /' >&2
+    echo "Chrome would NOT be rebuilt and the release would not match its own" >&2
+    echo "recorded source. Refusing to continue." >&2
+    exit 1
+fi
+log "board wipe verified: no chromeos-chrome installed or cached"
 
 # --- 3. bootstrap the board (setup_board + full build-packages) -------------
 log "bootstrap board: setup_board + build-packages (builds local Chrome)"
