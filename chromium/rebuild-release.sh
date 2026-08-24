@@ -77,13 +77,18 @@ platform2-patches/apply.sh chromiumos/src/platform2
 # and not reproducible from its own recorded manifest.
 #
 # --force is chromite's own board-root recreation: it knows about the mounts and
-# runs with the privileges to remove them.
+# runs with the privileges to remove them. It also leaves an EMPTY binpkg
+# directory behind, which is exactly right: deleting /build/<board>/packages
+# outright instead makes the next `cros build-packages` die in its eclean step
+# ("return code: 1; command: .../eclean -d -e ... packages"), because eclean
+# expects the directory to exist. --force is sufficient on its own -- verified:
+# zero chromeos-chrome binpkgs afterwards.
 log "nuke board build cache (keep out/sdk + .cache/distfiles)"
 in_container chromium-nuke-cache "
     set -ex
     cd ~/chromiumos
     cros_sdk -- setup_board --board=${BOARD} --force
-    cros_sdk -- sudo rm -rf /build/${BOARD}/packages /build/amd64-generic
+    cros_sdk -- sudo rm -rf /build/amd64-generic
     rm -rf src/build/images/${BOARD}
     echo 'kept: out/sdk (host SDK cache), .cache/distfiles (downloads)'
     df -h /home/cros/chromiumos
