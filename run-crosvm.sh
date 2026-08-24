@@ -175,7 +175,6 @@ exec env CROS_IMAGE=cros-crosvm GUI=1 PUBLISH_PORTS=1 \
     VM_SSH_PORT="$SSH_PORT" VM_VNC_PORT="$VNC_PORT" \
     CONTAINER_NAME="cros-vm-$ID" \
     "$DIR/cros-sdk.sh" bash -c "
-  unset DISPLAY
   export CROSVM_DISPLAY_SCALE=$SCALE
   CROSVM=.cache/crosvm-target/chromeos/crosvm
 
@@ -230,9 +229,18 @@ exec env CROS_IMAGE=cros-crosvm GUI=1 PUBLISH_PORTS=1 \
       --dhcp-range=192.168.77.10,192.168.77.100 \
       --dhcp-host=52:54:00:c0:ff:ee,192.168.77.2
 
+  DISPLAY_FLAGS=()
+  if [ -n \"\${WAYLAND_DISPLAY:-}\" ] && [ -e \"\$XDG_RUNTIME_DIR/\$WAYLAND_DISPLAY\" ]; then
+      DISPLAY_FLAGS+=(--wayland-sock \"\$XDG_RUNTIME_DIR/\$WAYLAND_DISPLAY\")
+  elif [ -n \"\${DISPLAY:-}\" ]; then
+      DISPLAY_FLAGS+=(--x-display \"\$DISPLAY\")
+  else
+      echo 'error: no WAYLAND_DISPLAY or DISPLAY available' >&2; exit 1
+  fi
+
   exec \$CROSVM run \
     --disable-sandbox \
-    --wayland-sock \"\$XDG_RUNTIME_DIR/\${WAYLAND_DISPLAY:-wayland-0}\" \
+    \"\${DISPLAY_FLAGS[@]}\" \
     --display-window-keyboard --display-window-mouse \
     --mem $MEM --cpus $CPUS \
     --net tap-name=crosvm_tap,mac=52:54:00:c0:ff:ee \
