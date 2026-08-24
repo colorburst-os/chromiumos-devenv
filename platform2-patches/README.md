@@ -16,3 +16,13 @@ workon for update_engine).
   `/var/lib/colorburst/device-id` (minted by the colorburst-device-id upstart
   job in the board overlay). Lets the update server tell installations apart
   for staged rollouts and honest fleet counts. Absent on USB/live boots.
+- **update-engine-dlc-url-0001.patch** — force-OTA DLCs (Crostini's termina)
+  bypass Omaha entirely: `InstallAction` fetches a raw `dlc.img` from a
+  hardcoded CDN and verifies it against the on-device imageloader manifest
+  hash. That CDN is Google's. Point it at `dl.colorburst.net` so "Install
+  Linux" works on a de-Googled image. See `release/DLC-RELEASE.md`.
+- **regions-drop-vi-tcvn-0001.patch** — removes `m17n:vi_tcvn` from the `vn`
+  region's input methods. colorburst's Chrome drops TCVN from
+  `m17n_manifest.json`, so no descriptor exists for that id; OOBE walks the
+  region's list and hits a `NOTREACHED()` on the null descriptor, which is
+  fatal in current Chromium. This is what crash-looped OOBE on 2026.32.9.

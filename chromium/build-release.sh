@@ -191,6 +191,74 @@ if missing:
 sys.exit(0)
 PYEOF
 check "region vn input methods all exist (OOBE would crash otherwise)" $?
+# --- language variants -------------------------------------------------------
+# One build serves every language. A variant is ChromeOS's own OEM
+# customization manifest, /opt/oem/etc/startup_manifest.json, written onto the
+# OEM partition by release/make-variant.sh. Three things have to hold, and all
+# three are silent when broken -- the image boots, just in English.
+#
+# 1. /opt/oem resolves. Chrome looks under /opt/oem; the OEM partition mounts at
+#    /usr/share/oem; the BSP symlinks one to the other. Without it the manifest
+#    is simply never read and every variant is English.
+[ "$(debugfs -c -R "stat /opt/oem" "$IMG?offset=$OFF" 2>/dev/null |
+     sed -n 's/^Fast link dest: "\(.*\)"$/\1/p')" = "/usr/share/oem" ]
+check "/opt/oem -> /usr/share/oem (Chrome can find the manifest)" $?
+# 2. The regions make-variant.sh will be asked for exist in the image's own
+#    database. It reads locale/timezone/keyboards out of THIS file to build the
+#    manifest, so a region missing here cannot be shipped as a variant.
+echo "$REGIONS_JSON" | python3 -c '
+import json, sys
+db = json.load(sys.stdin)
+missing = [r for r in ("us", "vn") if r not in db]
+if missing:
+    print("    cros-regions.json is missing:", missing)
+    sys.exit(1)'
+check "regions us + vn present in cros-regions.json" $?
+# 3. NOTHING sets a region. A region populates the initial_locale /
+#    initial_timezone / keyboard_layout statistics, and
+#    StartupCustomizationDocument applies statistics OVER the manifest
+#    unconditionally -- so a single --cros-region line anywhere silently beats
+#    every variant file we ship. chrome_dev.conf is the one place left that
+#    could reintroduce it (it is applied on developer images).
+#    Anchored to a real flag line: the BSP's comment block explains why the flag
+#    is absent and therefore contains the word "--cros-region" itself, so a bare
+#    grep fails a CORRECT image. (It did.)
+! echo "$CDC" | grep -qE "^[[:space:]]*--cros-region"
+check "chrome_dev.conf does not pin a region" $?
+# 4. The OEM partition itself: present, and FAT rather than ext4. FAT is not a
+#    detail -- it is what lets someone preparing a USB stick read the manifest
+#    from Windows. An ext4 OEM partition here means the board's disk_layout.json
+#    override did not take, and every variant would then have to be made on a
+#    Linux box.
+python3 - "$IMG" <<'PYEOF'
+import struct, sys
+img = sys.argv[1]
+with open(img, "rb") as f:
+    f.seek(512); hdr = f.read(92)
+    lba = struct.unpack("<Q", hdr[72:80])[0]
+    n = struct.unpack("<I", hdr[80:84])[0]
+    sz = struct.unpack("<I", hdr[84:88])[0]
+    f.seek(lba * 512)
+    start = None
+    for _ in range(n):
+        e = f.read(sz)
+        if e[56:128].decode("utf-16-le").rstrip("\x00") == "OEM":
+            start = struct.unpack("<Q", e[32:40])[0]
+            break
+    if start is None:
+        print("    no OEM partition -- variants cannot be made"); sys.exit(1)
+    f.seek(start * 512)
+    boot = f.read(512)
+    f.seek(start * 512 + 1024 + 56)
+    if f.read(2) == b"\x53\xef":
+        print("    OEM partition is ext4, not FAT -- the colorburst "
+              "disk_layout.json override did not take"); sys.exit(1)
+    if boot[510:512] != b"\x55\xaa":
+        print("    OEM partition has no FAT filesystem"); sys.exit(1)
+    if b"FAT" not in boot[54:90]:
+        print("    OEM partition boot sector does not name FAT"); sys.exit(1)
+PYEOF
+check "OEM partition is FAT (variants can be edited from Windows)" $?
 # Kernel built without VT consoles.
 KNAME=$(debugfs -c -R "ls /boot" "$IMG?offset=$OFF" 2>/dev/null |
         tr -s ' \n' '\n\n' | grep '^config-' | head -1)

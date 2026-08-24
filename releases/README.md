@@ -60,6 +60,40 @@ To rebuild a past release: check out the recorded chromium-os commit,
 `chromium/rebuild-release.sh`. The version comes from the tree, so it will
 match.
 
+## Language variants
+
+A version is **one build**. The USB images differ by one file on the OEM
+partition (#8) — ChromeOS's own OEM customization manifest,
+`/opt/oem/etc/startup_manifest.json`:
+
+```bash
+release/make-variant.sh us colorburst-<ver>.bin colorburst-<ver>-en.bin
+release/make-variant.sh vn colorburst-<ver>.bin colorburst-<ver>-vi.bin
+```
+
+Run it for **every** shipped image, English included: an explicit manifest
+beats an implicit default, and the Windows partition type has to be stamped
+either way. The repack touches a few hundred bytes of a 6.6 GB image and
+involves nothing signed or verity-hashed. Needs `mtools` and `e2fsprogs`.
+
+This matters beyond saving build time:
+
+- **One OTA stream.** Payloads carry KERN + ROOT only, identical across
+  variants, so every device takes the same signed payload.
+- **The personality sticks.** The OEM partition is copied USB → disk at
+  install and survives both OTA and powerwash, so a powerwashed machine comes
+  back up in Vietnamese, not English.
+- **It can be changed on Windows.** FAT32 typed as Microsoft basic data, so a
+  USB stick shows the partition in Explorer. (Removable media only; once
+  installed, the internal disk's partition 8 is retyped from the board layout.)
+- **No colorburst mechanism on the device.** The manifest is upstream's, read
+  by `StartupCustomizationDocument`. The region name is only a lookup key at
+  repack time: `make-variant.sh` reads that region's locale, timezone and
+  keyboard list out of the image's own `cros-regions.json`.
+
+A variant is not a fork of the release: `RELEASE.json` records one build, with
+the variant images as additional artifacts.
+
 ## Branches
 
 ```
@@ -87,6 +121,8 @@ git add -A && git commit -m "Cut <version>"
 git -C chromiumos/src/overlays commit -am "Cut <version>"
 release/cut.sh record                      # BUILD-ID = the cut commit
 chromium/rebuild-release.sh                # builds exactly this version
+release/make-variant.sh us <img>.bin <img>-en.bin   # run for EVERY variant
+release/make-variant.sh vn <img>.bin <img>-vi.bin
 release/sign-on-yubikey.sh chromiumos/ota-release/<version>
 release/publish.sh chromiumos/ota-release/<version>
 release/publish-dlc-images.sh

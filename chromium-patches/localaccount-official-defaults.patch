@@ -1,4 +1,4 @@
-From aa6b04df60cd2ae096cb0a6895b28fb1f347355d Mon Sep 17 00:00:00 2001
+From de0e5a8e16498732dabe3c0fc17659c14c3b8ce4 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
  <212658678+luuoaoa@users.noreply.github.com>
 Date: Mon, 17 Aug 2026 14:41:58 -0700
@@ -25,14 +25,21 @@ GOOGLE_API_KEY / GOOGLE_DEFAULT_CLIENT_ID / GOOGLE_DEFAULT_CLIENT_SECRET
 (dummy values, via the environment google_apis reads),
 --disable-gaia-services, --skip-force-online-signin-for-testing,
 --disable-hid-detection-on-oobe, --profile-requires-policy=false,
---allow-failed-policy-fetch-for-test, --disable-policy-key-verification,
---cros-region=vn.
+--allow-failed-policy-fetch-for-test, --disable-policy-key-verification.
 
+NOT --cros-region. The BSP block pinned it to "vn", but locale, timezone
+and keyboard come from ChromeOS's own OEM customization manifest instead
+(/opt/oem/etc/startup_manifest.json, StartupCustomizationDocument),
+written per variant by release/make-variant.sh -- so one build serves
+every language. Setting a region here would silently defeat that:
+StartupCustomizationDocument applies the region's machine statistics OVER
+the manifest unconditionally, so any region beats the file that is meant
+to be authoritative. See the comment at the call site.
 ---
  chrome/BUILD.gn                    |  4 ++
  chrome/app/BUILD.gn                |  4 ++
- chrome/app/chrome_main_delegate.cc | 80 ++++++++++++++++++++++++++++++
- 3 files changed, 88 insertions(+)
+ chrome/app/chrome_main_delegate.cc | 78 ++++++++++++++++++++++++++++++
+ 3 files changed, 86 insertions(+)
 
 diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
 index 7873418e78..406f06b5cb 100644
@@ -65,7 +72,7 @@ index 07e4d3aa87..2422ce438a 100644
    }
  
 diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
-index 45f00944bf..5deb1e202e 100644
+index 45f00944bf..49f5089266 100644
 --- a/chrome/app/chrome_main_delegate.cc
 +++ b/chrome/app/chrome_main_delegate.cc
 @@ -160,6 +160,7 @@
@@ -76,7 +83,7 @@ index 45f00944bf..5deb1e202e 100644
  #include "content/public/common/content_features.h"
  #endif
  
-@@ -1066,6 +1067,75 @@ void ChromeMainDelegate::SetupTracing() {
+@@ -1066,6 +1067,73 @@ void ChromeMainDelegate::SetupTracing() {
            std::move(tracing_factory), unwinder_type);
  }
  
@@ -137,13 +144,11 @@ index 45f00944bf..5deb1e202e 100644
 +    command_line->AppendSwitchASCII(ash::switches::kProfileRequiresPolicy,
 +                                    "false");
 +  }
-+  // Vietnamese by default: cros-regions.json carries a "vn" entry, and
-+  // --cros-region overrides the VPD region, which generic hardware does not
-+  // have. Gives Vietnamese OOBE, Asia/Ho_Chi_Minh and the Vietnamese keyboard
-+  // layouts.
-+  if (!command_line->HasSwitch(ash::switches::kCrosRegion)) {
-+    command_line->AppendSwitchASCII(ash::switches::kCrosRegion, "vn");
-+  }
++  // No --cros-region. Locale, timezone and keyboard come from the OEM
++  // customization manifest (/opt/oem/etc/startup_manifest.json), written per
++  // variant by release/make-variant.sh. Any region would override it:
++  // StartupCustomizationDocument applies region statistics over the manifest
++  // unconditionally.
 +}
 +
 +}  // namespace
@@ -152,7 +157,7 @@ index 45f00944bf..5deb1e202e 100644
  std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
  #if BUILDFLAG(IS_CHROMEOS)
    ash::BootTimesRecorder::Get()->SaveChromeMainStats();
-@@ -1100,6 +1170,16 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
+@@ -1100,6 +1168,16 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
    // The DevTools remote debugging pipe file descriptors need to be checked
    // before any other files are opened, see https://crbug.com/40259890.
    const bool is_browser = !command_line.HasSwitch(switches::kProcessType);
