@@ -128,10 +128,4 @@ am ime-vni-and-methods-0001.patch
 # no other patch edits; generated at full-series HEAD, so it applies last.
 am degoogle-0006-remove-ai-and-you-and-google.patch
 
-# Stop pinning --cros-region=vn inside the binary: the region is read off the
-# OEM partition by session_manager now, so one Chrome build serves every
-# language variant. Reverses one hunk of localaccount-official-defaults, so it
-# must follow it; touches nothing else, so it goes last.
-am variant-0001-region-neutral.patch
-
 echo "OK. All colorburst patches applied. Now rebuild chrome (ash-chrome)."

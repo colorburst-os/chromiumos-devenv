@@ -30,7 +30,7 @@ The full series, in the order `apply-all.sh` applies it:
 | 11 | `localaccount-vi-strings.patch` | Vietnamese translations for the local-account OOBE strings |
 | 12 | `degoogle-0004-no-enroll.patch` | hides the "for work" card on the user-creation screen |
 | 13 | `degoogle-0005-translate-no-autopop.patch` | Translate never pops up by itself; the omnibox icon stays |
-| 14 | `localaccount-official-defaults.patch` | bakes the Gaia-less local-account defaults into ash-chrome |
+| 14 | `localaccount-official-defaults.patch` | bakes the Gaia-less local-account defaults into ash-chrome. Sets **no** `--cros-region`: locale/timezone/keyboard come from ChromeOS's OEM customization manifest on the OEM partition, and any region would override it |
 | 15 | `localaccount-accept-languages-no-fr.patch` | drops French from the Vietnamese default Accept-Language (an upstream `vi` translation artefact) |
 | 16 | `spellcheck-enable-en-us.patch` | enables the en-US dictionary so ordinary English words stop being flagged |
 | 17 | `branding-0002-install-colorburst.patch` | OOBE shelf: Install colorburst, not ChromeOS Flex |
@@ -50,14 +50,13 @@ The full series, in the order `apply-all.sh` applies it:
 | 31 | `telex-i18n-underline-0001.patch` | finishes the Vietnamese options-page translations; composition underline off by default |
 | 32 | `ime-vni-and-methods-0001.patch` | adds VNI and VIQR as selectable methods, routed through the same UniKey engine |
 | 33 | `degoogle-0006-remove-ai-and-you-and-google.patch` | removes the "AI in Chrome" page and the "You and Google" section from Settings |
-| 34 | `variant-0001-region-neutral.patch` | stops pinning a region in the binary. Locale/timezone/keyboard come from ChromeOS's own OEM customization manifest on the OEM partition instead, so one build serves every language |
 
 **On the Vietnamese patches.** There are a lot of them, and none of them make
 this a Vietnamese build. Every one is locale-scoped — a `vi` `.xtb` translation,
 a recommendation that fires for a Vietnamese profile, an input method that
 appears once you pick Vietnamese. The English strings sit in the `.grd` files
 where upstream keeps them, and the image ships Chromium's full locale set. A
-colorburst image is English by default (patch 34) and becomes Vietnamese when
+colorburst image is English by default (patch 14 sets no region) and becomes Vietnamese when
 its OEM manifest says so — a repack, not a build (`release/make-variant.sh`). Read
 them as the worked example of what localizing this fork properly costs, not as
 a fork of it.
