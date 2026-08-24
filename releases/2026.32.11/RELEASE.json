@@ -1,0 +1,26 @@
+{
+  "version": "2026.32.11",
+  "source": {
+    "chromium_os": {
+      "repo": "colorburst-os/chromiumos-devenv",
+      "commit": "e59657f2f6a834c5ba8009c312c8b38351ea8420"
+    },
+    "chromium": {
+      "pinned_base": "831a446cd4",
+      "patches": "chromium-patches/apply-all.sh at the commit above"
+    },
+    "manifest": {
+      "file": "manifest.xml",
+      "note": "repo manifest -r: every project at an exact SHA"
+    },
+    "forks": {
+      "board-overlays": "e33c8c80b7caa4949d8c20dba44ec8f35a6fdff3",
+      "crosvm": "d1dd56403fb897955c54f2827aa4e5851db1f1e5"
+    }
+  },
+  "artifacts": {},
+  "signing": {
+    "key": "update-payload-key.pub.pem",
+    "slot": "YubiKey PIV 9C"
+  }
+}
