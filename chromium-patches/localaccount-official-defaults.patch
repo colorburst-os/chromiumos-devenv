@@ -1,4 +1,4 @@
-From fc821b63981884036b03985bd12bb7192c8c7a59 Mon Sep 17 00:00:00 2001
+From de0e5a8e16498732dabe3c0fc17659c14c3b8ce4 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
  <212658678+luuoaoa@users.noreply.github.com>
 Date: Mon, 17 Aug 2026 14:41:58 -0700
@@ -38,8 +38,8 @@ to be authoritative. See the comment at the call site.
 ---
  chrome/BUILD.gn                    |  4 ++
  chrome/app/BUILD.gn                |  4 ++
- chrome/app/chrome_main_delegate.cc | 93 ++++++++++++++++++++++++++++++
- 3 files changed, 101 insertions(+)
+ chrome/app/chrome_main_delegate.cc | 78 ++++++++++++++++++++++++++++++
+ 3 files changed, 86 insertions(+)
 
 diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
 index 7873418e78..406f06b5cb 100644
@@ -72,7 +72,7 @@ index 07e4d3aa87..2422ce438a 100644
    }
  
 diff --git a/chrome/app/chrome_main_delegate.cc b/chrome/app/chrome_main_delegate.cc
-index 45f00944bf..f3b91b1711 100644
+index 45f00944bf..49f5089266 100644
 --- a/chrome/app/chrome_main_delegate.cc
 +++ b/chrome/app/chrome_main_delegate.cc
 @@ -160,6 +160,7 @@
@@ -83,7 +83,7 @@ index 45f00944bf..f3b91b1711 100644
  #include "content/public/common/content_features.h"
  #endif
  
-@@ -1066,6 +1067,88 @@ void ChromeMainDelegate::SetupTracing() {
+@@ -1066,6 +1067,73 @@ void ChromeMainDelegate::SetupTracing() {
            std::move(tracing_factory), unwinder_type);
  }
  
@@ -144,26 +144,11 @@ index 45f00944bf..f3b91b1711 100644
 +    command_line->AppendSwitchASCII(ash::switches::kProfileRequiresPolicy,
 +                                    "false");
 +  }
-+  // No --cros-region here, and deliberately none anywhere else either. Locale,
-+  // timezone and keyboard come from the OEM customization manifest ChromeOS
-+  // already defines -- /opt/oem/etc/startup_manifest.json, read by
-+  // StartupCustomizationDocument -- written onto the OEM partition per variant
-+  // by release/make-variant.sh. That keeps the language out of the binary, so
-+  // one build serves every variant.
-+  //
-+  // Setting a region here would silently defeat that. A region populates the
-+  // initial_locale / initial_timezone / keyboard_layout machine statistics from
-+  // cros-regions.json, and StartupCustomizationDocument::Init() applies those
-+  // statistics OVER the manifest unconditionally (customization_document.cc:
-+  // "If manifest doesn't exist still apply values from VPD" -- but the code
-+  // applies them whether or not the manifest exists). So any region at all,
-+  // including a well-meant "us" default, beats the file that is supposed to be
-+  // authoritative.
-+  //
-+  // A device with neither is fine and is a configuration upstream expects: the
-+  // hardware keyboard list falls back to xkb:us::eng
-+  // (InputMethodUtil::UpdateHardwareLayoutCache, whose comment names this exact
-+  // case), and the locale falls back to Chrome's own default, en-US.
++  // No --cros-region. Locale, timezone and keyboard come from the OEM
++  // customization manifest (/opt/oem/etc/startup_manifest.json), written per
++  // variant by release/make-variant.sh. Any region would override it:
++  // StartupCustomizationDocument applies region statistics over the manifest
++  // unconditionally.
 +}
 +
 +}  // namespace
@@ -172,7 +157,7 @@ index 45f00944bf..f3b91b1711 100644
  std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
  #if BUILDFLAG(IS_CHROMEOS)
    ash::BootTimesRecorder::Get()->SaveChromeMainStats();
-@@ -1100,6 +1183,16 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
+@@ -1100,6 +1168,16 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
    // The DevTools remote debugging pipe file descriptors need to be checked
    // before any other files are opened, see https://crbug.com/40259890.
    const bool is_browser = !command_line.HasSwitch(switches::kProcessType);
