@@ -20,6 +20,15 @@ set -eu
 # Previously this used `set -x` only and ended with `echo BOOTSTRAP_RC=$?`,
 # whose own 0 exit masked a failed build-packages and let the build fall
 # through to an image made from a stale/remote Chrome.
+#
+# --no-withautotest: colorburst ships no autotest, and chromeos-base/autotest-
+# chrome does not build in this tree -- it dies in its compile phase on
+# "ERROR:root:video_AVAnalysis import error: No module named 'telemetry'".
+# Nothing here ever ran it; the package was simply never rebuilt, because the
+# board wipe in rebuild-release.sh silently failed for who knows how long and
+# left a fully-populated sysroot behind every time. Fixing the wipe is what
+# first made this script actually build a board from nothing, and this is the
+# first thing that fell over when it did.
 in_container "chromium-bootstrap-$BOARD" "
 set -ex
 date -Is
@@ -29,7 +38,7 @@ cros_sdk --chrome-root=/chromium -- env \
   CHROME_ORIGIN=LOCAL_SOURCE \
   USE='chrome_media hevc_codec -chrome_debug -build_tests' \
   EXTRA_GN_ARGS='symbol_level=0 blink_symbol_level=0' \
-  cros build-packages --board=${BOARD}
+  cros build-packages --board=${BOARD} --no-withautotest
 echo BOOTSTRAP_OK
 date -Is
 "
