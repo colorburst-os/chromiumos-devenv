@@ -15,6 +15,19 @@ docker run --rm hello-world
 ls /dev/kvm        # must exist; if not, enable VT-x/AMD-V in your BIOS
 ```
 
+**NVIDIA GPU acceleration (optional):** if you have an NVIDIA GPU and
+want hardware-accelerated virgl rendering (much faster than software),
+install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html):
+
+```bash
+sudo apt install nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+The scripts detect `nvidia-smi` on the host and inject the runtime
+automatically — no extra flags needed.
+
 You need roughly 10 GB of RAM free while a VM runs (the guest gets 8 GB)
 and a Wayland or X11 desktop session for the VM window.
 
@@ -57,7 +70,7 @@ org, so you need org membership and the `gh` credential helper
 build crosvm from a full ChromiumOS checkout instead).
 
 ```bash
-docker build -t cros-crosvm docker/crosvm
+docker build --build-arg HOST_UID=$(id -u) -t cros-crosvm docker/crosvm
 tools/fetch-crosvm-src.sh
 
 env CROS_IMAGE=cros-crosvm NET=host ./cros-sdk.sh bash -c '
@@ -101,8 +114,10 @@ its disk over virtio-scsi).
 
 - SSH into the guest: `ssh -p 9222 root@localhost`, password `test0000`.
 - Stop: close the window or Ctrl-C.
-- Window too big/small: `CROS_DISPLAY=1920x1200 CROS_SCALE=1 ...`
-  (framebuffer size and desktop scaling).
+- Window too big/small: `CROS_DISPLAY=1920x1080 ...`
+  sets the framebuffer size in pixels. `CROS_SCALE` adjusts desktop
+  scaling but only works under Wayland; on X11 only `CROS_DISPLAY`
+  has an effect.
 
 The image file is never modified — each run boots a copy-on-write
 overlay, so deleting `chromiumos/.vm/0/disk.qcow2` resets the VM to a
@@ -130,3 +145,7 @@ namespace. RAM is the limit: ~4 GB per extra instance.
 | Black window after the boot splash | Wait 30 s first; if it stays black, the image was built without GPU drivers — use a release image |
 | `/dev/kvm` missing | Enable virtualization (VT-x / AMD-V) in your BIOS |
 | Docker permission denied | You didn't re-login after `usermod -aG docker` |
+| Permission denied on source tree inside container | Your host UID is not 1000 — rebuild with `docker build --build-arg HOST_UID=$(id -u) ...` |
+| `failed to connect to compositor` / no window | You're on X11, not Wayland — update to the version of `run-crosvm.sh` that auto-detects the display server |
+| Very slow / choppy VM display | Install `nvidia-container-toolkit` and restart Docker (see step 1) for GPU-accelerated rendering |
+| Mouse and keyboard don't work in the VM | The kernel needs `CONFIG_VIRTIO_INPUT=y` — see the build guide for the kernel config patch |
