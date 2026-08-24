@@ -29,9 +29,21 @@ docker run --rm hello-world
 ls /dev/kvm        # must exist; if not, enable VT-x/AMD-V in your BIOS
 ```
 
-Unlike building, running a VM **does** need KVM, a Wayland or X11 desktop
-session for the window, and roughly 10 GB of free RAM while the guest runs
-(the guest gets 8 GB by default).
+**NVIDIA GPU acceleration (optional):** if you have an NVIDIA GPU and
+want hardware-accelerated virgl rendering (much faster than software),
+install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html):
+
+```bash
+sudo apt install nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+The scripts detect `nvidia-smi` on the host and inject the runtime
+automatically — no extra flags needed.
+
+You need roughly 10 GB of RAM free while a VM runs (the guest gets 8 GB)
+and a Wayland or X11 desktop session for the VM window.
 
 ## 2. Put an image where the container can see it
 
@@ -59,7 +71,7 @@ full ChromiumOS checkout needed), and compile crosvm. About 10 minutes.
 creates the `third_party/minijail` symlink the build needs.
 
 ```bash
-docker build -t cros-crosvm docker/crosvm
+docker build --build-arg HOST_UID=$(id -u) -t cros-crosvm docker/crosvm
 tools/fetch-crosvm-src.sh
 
 env CROS_IMAGE=cros-crosvm NET=host ./cros-sdk.sh bash -c '
@@ -102,10 +114,11 @@ and the guest hangs at `Waiting for root device`. `CROS_VM_SCSI=0` exists only
 for old amd64-generic images.
 
 - SSH into the guest: `ssh -p 9222 root@localhost`, password `test0000`.
-  Test images only — release images ship no remote access, by design.
-- Stop: close the window, or Ctrl-C in the terminal.
+- Stop: close the window or Ctrl-C.
 - Window too big/small: `CROS_DISPLAY=1920x1200 CROS_SCALE=1 ./run-crosvm.sh …`
-  (framebuffer size and desktop scaling).
+  sets the framebuffer size in pixels. `CROS_SCALE` adjusts desktop
+  scaling but only works under Wayland; on X11 only `CROS_DISPLAY`
+  has an effect.
 - Start over from a clean system: delete `chromiumos/.vm/0/disk.qcow2`.
 
 The image file is never modified — each run boots a copy-on-write overlay on
@@ -134,5 +147,8 @@ instance.
 | Boot hangs at `Waiting for root device` | The disk was attached as virtio-blk. Do not set `CROS_VM_SCSI=0` for colorburst images |
 | Black window after the boot splash | Wait 30 s first. If it stays black, the image was built without the virgl driver — see the last section of [README.md](README.md) |
 | `/dev/kvm` missing | Enable virtualization (VT-x / AMD-V) in your BIOS |
-| Docker permission denied | You did not re-login after `usermod -aG docker` |
-| Container name already in use | A previous run did not clean up: `docker rm -f cros-vm-0` |
+| Docker permission denied | You didn't re-login after `usermod -aG docker` |
+| Permission denied on source tree inside container | Your host UID is not 1000 — rebuild with `docker build --build-arg HOST_UID=$(id -u) ...` |
+| `failed to connect to compositor` / no window | You're on X11, not Wayland — update to the version of `run-crosvm.sh` that auto-detects the display server |
+| Very slow / choppy VM display | Install `nvidia-container-toolkit` and restart Docker (see step 1) for GPU-accelerated rendering |
+| Mouse and keyboard don't work in the VM | The kernel needs `CONFIG_VIRTIO_INPUT=y` — see the build guide for the kernel config patch |
