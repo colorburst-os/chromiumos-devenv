@@ -44,9 +44,20 @@ cros_sdk --chrome-root=/chromium -- \
 UE_RC=\$?; echo UE_RC=\$UE_RC
 [ \$UE_RC -eq 0 ] || exit \$UE_RC
 
+# The kernel carries our colorburst patch (CONFIG_VIRTIO_INPUT on reven, so
+# crosvm's window mouse/keyboard reach the guest -- see kernel-patches/). Same
+# cros-workon trap as update_engine above: without starting workon, emerge
+# silently builds the pinned upstream revision and the patch vanishes.
+cros_sdk --chrome-root=/chromium -- \
+  cros_workon --board=${BOARD} start sys-kernel/chromeos-kernel-6_12 2>/dev/null
+cros_sdk --chrome-root=/chromium -- \
+  emerge-${BOARD} -v --usepkg n --getbinpkg n sys-kernel/chromeos-kernel-6_12
+KERNEL_RC=\$?; echo KERNEL_RC=\$KERNEL_RC
+[ \$KERNEL_RC -eq 0 ] || exit \$KERNEL_RC
+
 # cros build-image runs \`parallel_emerge --usepkgonly virtual/target-os\`, so
 # EVERY package the image pulls in must already have a binpkg. This script only
-# built chromeos-chrome/BSP/update_engine explicitly; a fresh or partial
+# built chromeos-chrome/BSP/update_engine/kernel explicitly; a fresh or partial
 # bootstrap-board.sh (e.g. one that aborted on the Chrome chain) leaves the
 # image meta-packages and everything downstream of Chrome with no binpkg, and
 # \`cros build-image\` then dies at the very end with a cryptic

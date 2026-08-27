@@ -1,0 +1,39 @@
+From 19393bbd46d8c7fff376932f9504e8a21a8da95c Mon Sep 17 00:00:00 2001
+From: Donald J Bindner <don.bindner@gmail.com>
+Date: Wed, 26 Aug 2026 20:55:01 -0500
+Subject: [PATCH] reven kernel: enable virtio-input so crosvm mouse/keyboard
+ work
+
+crosvm's --display-window-keyboard/--display-window-mouse deliver guest
+input over a virtio-input device (drivers/virtio/virtio_input.c). The
+reven flavour config never set CONFIG_VIRTIO_INPUT, so it defaulted to
+n (Kconfig has no 'default y') and the driver was compiled out entirely
+-- not a module, not built in. Every VM built on the colorburst/reven
+kernel therefore booted with a dead mouse and keyboard, even though
+crosvm was sending the events correctly.
+
+Match the existing style of its virtio siblings a few lines down
+(VIRTIO_BLK=m, VIRTIO_NET=m): build it as a module, loaded by udev after
+root mounts, the same way virtio_blk already is despite the noinitrd
+direct-kernel boot.
+
+Change-Id: I4fd9316037d64f76b4b9439fbaab5ed4270c12f4
+---
+ .../config/chromeos/x86_64/chromeos-x86_64-reven.flavour.config  | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/chromeos/config/chromeos/x86_64/chromeos-x86_64-reven.flavour.config b/chromeos/config/chromeos/x86_64/chromeos-x86_64-reven.flavour.config
+index e449cb26043f..7dc58ef7340f 100644
+--- a/chromeos/config/chromeos/x86_64/chromeos-x86_64-reven.flavour.config
++++ b/chromeos/config/chromeos/x86_64/chromeos-x86_64-reven.flavour.config
+@@ -306,6 +306,7 @@ CONFIG_VIDEO_OV5693=m
+ CONFIG_VIDEO_OV7251=m
+ CONFIG_VIDEO_OV8865=m
+ CONFIG_VIRTIO_BLK=m
++CONFIG_VIRTIO_INPUT=m
+ CONFIG_VIRTIO_NET=m
+ CONFIG_VIRTIO_PCI=y
+ CONFIG_VMD=y
+-- 
+2.53.0
+
