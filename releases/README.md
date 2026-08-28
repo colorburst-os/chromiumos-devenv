@@ -124,7 +124,8 @@ chromium/rebuild-release.sh                # builds exactly this version
 release/make-variant.sh us <img>.bin <img>-en.bin   # run for EVERY variant
 release/make-variant.sh vn <img>.bin <img>-vi.bin
 release/sign-on-yubikey.sh chromiumos/ota-release/<version>
-release/publish.sh chromiumos/ota-release/<version>
+release/publish.sh chromiumos/ota-release/<version>       # OTA payload -> R2
+release/publish-usb-images.sh <version>                  # USB zips -> GitHub release
 release/publish-dlc-images.sh
 release/tag.sh <version>                   # records artifact hashes, tags repos
 ```
