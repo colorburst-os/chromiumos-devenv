@@ -27,6 +27,15 @@ The target board is `colorburst`, based on `reven` (the board behind ChromeOS Fl
   sudo usermod -aG docker $USER     # log out and back in
   docker run --rm hello-world       # must succeed before continuing
   ```
+- **The `cros-build` image, built for your UID.** `docker/Dockerfile` bakes in a
+  fixed UID (default 1000) for the container's build user, and every script here
+  bind-mounts `chromiumos/` and `$CHROME` from the host into that user. If your
+  UID differs, the container user can't write to them and you'll see
+  `PermissionError: ... Permission denied` partway through `chromium/fetch.sh`
+  or a build. Build the image against your own UID before starting:
+  ```bash
+  docker build --build-arg HOST_UID=$(id -u) -t cros-build docker/
+  ```
 - **~200 GB free disk.** The ChromiumOS checkout is ~176 GB; Chromium adds ~30 GB.
 - **Time.** Allow a large source sync and 2–4 hours to compile on a cold machine, mostly for Chrome. Later rebuilds take minutes.
 - **`repo` and `git`** on the host for the source sync.
@@ -38,7 +47,8 @@ KVM, a GPU, and a desktop session are not required to build. They are required o
 The tree contains 287 git projects and lives outside this repository. `repo` assembles it from a pinned manifest:
 
 ```bash
-mkdir chromiumos && cd chromiumos
+gh repo clone colorburst-os/chromiumos-devenv && cd chromiumos-devenv
+mkdir -p chromiumos && cd chromiumos
 # Init any manifest first so .repo/manifests exists as a git repo.
 repo init -u https://chromium.googlesource.com/chromiumos/manifest
 # Install the pinned manifest and re-init against it.
