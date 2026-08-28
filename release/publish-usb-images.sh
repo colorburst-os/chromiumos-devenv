@@ -33,8 +33,14 @@ DRAFT=""
 command -v gh >/dev/null || { echo "gh not found" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated" >&2; exit 1; }
 
-IMGDIR="$(ls -d chromiumos/src/build/images/${BOARD}/*/ 2>/dev/null |
-          xargs -I{} sh -c 'ls {}colorburst-'"${VER}"'-en.zip >/dev/null 2>&1 && echo {}' | head -1)"
+# A plain loop, not `ls | xargs | head`: head closes the pipe on the first match,
+# xargs dies of SIGPIPE, and with `set -o pipefail` that aborts the whole script
+# before it does anything -- reported as a bare "xargs: sh: terminated by
+# signal 13".
+IMGDIR=""
+for d in chromiumos/src/build/images/${BOARD}/*/; do
+    if [ -f "${d}colorburst-${VER}-en.zip" ]; then IMGDIR="$d"; break; fi
+done
 [ -n "$IMGDIR" ] || {
     echo "no colorburst-${VER}-en.zip under chromiumos/src/build/images/${BOARD}/" >&2
     echo "Build the release, then run release/make-variant.sh for each variant." >&2
