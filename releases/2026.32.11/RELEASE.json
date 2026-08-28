@@ -1,0 +1,51 @@
+{
+  "version": "2026.32.11",
+  "source": {
+    "chromium_os": {
+      "repo": "colorburst-os/chromiumos-devenv",
+      "commit": "4f87d6d35d79d9a297be0973f7cf3a9a58c1dbc0"
+    },
+    "chromium": {
+      "pinned_base": "831a446cd4",
+      "patches": "chromium-patches/apply-all.sh at the commit above"
+    },
+    "manifest": {
+      "file": "manifest.xml",
+      "note": "repo manifest -r: every project at an exact SHA"
+    },
+    "forks": {
+      "board-overlays": "a07abd012e641147b0634c0e98bdfb158615696c",
+      "crosvm": "d1dd56403fb897955c54f2827aa4e5851db1f1e5"
+    }
+  },
+  "artifacts": {
+    "image": {
+      "name": "colorburst-2026.32.11-release.bin",
+      "sha256": "d31b36844c78bdfe8a11984cb867301f88d97adbe0df6f4acbd2a8850c9bb0f7",
+      "size": 7023452672
+    },
+    "ota_payload": {
+      "name": "colorburst-2026.32.11-full-signed.bin",
+      "sha256": "c900d64ab9a8fd57045fb1f804d3ae9209de3dd561b2d7a9b75caab463631ef1",
+      "size": 743078324,
+      "metadata_size": 65840,
+      "is_delta": false
+    },
+    "usb_images": {
+      "en": {
+        "name": "colorburst-2026.32.11-en.zip",
+        "sha256": "1f6fe948bbaefda9f74424cd649dbd496ea2937d51db10852f4f6fc8e15c699c",
+        "size": 1055510812
+      },
+      "vi": {
+        "name": "colorburst-2026.32.11-vi.zip",
+        "sha256": "5d51829ec825123e4e032d7d439167c5489cecfc811e530fb29c608cd50fe6e4",
+        "size": 1055516947
+      }
+    }
+  },
+  "signing": {
+    "key": "update-payload-key.pub.pem",
+    "slot": "YubiKey PIV 9C"
+  }
+}
