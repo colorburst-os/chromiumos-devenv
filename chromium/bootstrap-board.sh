@@ -13,6 +13,7 @@
 # binhost and silently ship upstream Chrome with none of our patches.
 set -eu
 . "$(dirname "$0")/common.sh"
+inhibit_sleep "$0" "$@"   # keep the host awake; released when this exits
 
 # `set -e` inside the container: any failure (notably a local-Chrome compile
 # error) aborts with a non-zero status, which propagates out through

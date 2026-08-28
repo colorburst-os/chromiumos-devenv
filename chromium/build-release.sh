@@ -39,6 +39,7 @@
 set -eu
 export BOARD="${BOARD:-colorburst}"
 . "$(dirname "$0")/common.sh"
+inhibit_sleep "$0" "$@"   # keep the host awake; released when this exits
 
 RELEASE_USE='-vtconsole -fbconsole -efi_earlycon -colorburst_devtools'
 AUSERVER='https://update.colorburst.net/update'
