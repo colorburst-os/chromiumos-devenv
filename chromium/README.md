@@ -38,18 +38,17 @@ The full series, in the order `apply-all.sh` applies it:
 | 19 | `apps-0001-gallery-viewer-and-no-mall.patch` | a real Gallery viewer; Apps & games removed |
 | 20 | `unikey-payload/` (vendored LGPL ukengine) | the UniKey Vietnamese engine core, host-proven (VIETNAMESE-IME.md†) |
 | 21 | `ime-unikey-0001-mojo-adapter.patch` | wires ukengine behind `mojom::InputMethod` for Vietnamese Telex |
-| 22 | `ime-routing-0000-poc-probe.patch` | PoC routing probe on the native-engine observer |
-| 23 | `ime-routing-0001-m17n-native.patch` | routes the m17n IME extension to the native mojo engine (step 0) |
-| 24 | `telex-settings-0001.patch` | delivers Telex settings live on the mojo rule-based path |
-| 25 | `branding-0003-guest-tos.patch` | Guest ToS: the usage-data toggle names colorburst, not Google |
-| 26 | `ime-orca-crash-0001.patch` | fixes a browser SIGSEGV when activating a `vkd_*` IME (Orca service removed) |
-| 27 | `telex-w-toggle-0001.patch` | makes the standalone-`w` → `ư` shortcut a real toggle, default off |
-| 28 | `telex-settings-ui-0001-options-page.patch` | makes the Vietnamese options page reachable in Settings for the unbranded m17n extension id |
-| 29 | `telex-nonvn-restore-0001.patch` | exposes "restore non-Vietnamese words" as a Settings toggle, default on |
-| 30 | `ime-tcvn-0001-drop-option.patch` | drops TCVN as a Vietnamese input option |
-| 31 | `telex-i18n-underline-0001.patch` | finishes the Vietnamese options-page translations; composition underline off by default |
-| 32 | `ime-vni-and-methods-0001.patch` | adds VNI and VIQR as selectable methods, routed through the same UniKey engine |
-| 33 | `degoogle-0006-remove-ai-and-you-and-google.patch` | removes the "AI in Chrome" page and the "You and Google" section from Settings |
+| 22 | `ime-routing-0001-m17n-native.patch` | routes the m17n IME extension to the native mojo engine (step 0) |
+| 23 | `telex-settings-0001.patch` | delivers Telex settings live on the mojo rule-based path |
+| 24 | `branding-0003-guest-tos.patch` | Guest ToS: the usage-data toggle names colorburst, not Google |
+| 25 | `ime-orca-crash-0001.patch` | fixes a browser SIGSEGV when activating a `vkd_*` IME (Orca service removed) |
+| 26 | `telex-w-toggle-0001.patch` | makes the standalone-`w` → `ư` shortcut a real toggle, default off |
+| 27 | `telex-settings-ui-0001-options-page.patch` | makes the Vietnamese options page reachable in Settings for the unbranded m17n extension id |
+| 28 | `telex-nonvn-restore-0001.patch` | exposes "restore non-Vietnamese words" as a Settings toggle, default on |
+| 29 | `ime-tcvn-0001-drop-option.patch` | drops TCVN as a Vietnamese input option |
+| 30 | `telex-i18n-underline-0001.patch` | finishes the Vietnamese options-page translations; composition underline off by default |
+| 31 | `ime-vni-and-methods-0001.patch` | adds VNI and VIQR as selectable methods, routed through the same UniKey engine |
+| 32 | `degoogle-0006-remove-ai-and-you-and-google.patch` | removes the "AI in Chrome" page and the "You and Google" section from Settings |
 
 **On the Vietnamese patches.** There are a lot of them, and none of them make
 this a Vietnamese build. Every one is locale-scoped — a `vi` `.xtb` translation,

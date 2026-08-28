@@ -93,7 +93,6 @@ am apps-0001-gallery-viewer-and-no-mall.patch
 cp -r "$HERE/unikey-payload/." "$SRC/"
 snap "[PoC] Vendor LGPL ukengine and prove it host-side (Vietnamese IME)"
 am ime-unikey-0001-mojo-adapter.patch
-am ime-routing-0000-poc-probe.patch
 am ime-routing-0001-m17n-native.patch
 am telex-settings-0001.patch
 am branding-0003-guest-tos.patch
