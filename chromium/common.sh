@@ -67,3 +67,25 @@ release_version() {
     [ -f "$f" ] || { echo "no $f -- the tree has no version (see releases/README.md)" >&2; return 1; }
     tr -d '[:space:]' < "$f"
 }
+
+# Keep the machine awake for the length of a build. Re-execs the calling script
+# under systemd-inhibit, so the lock is released when that process exits --
+# success, failure, or kill. A trap would miss SIGKILL; this cannot.
+#
+#   inhibit_sleep "$0" "$@"     # first line of an entry-point script
+#
+# No-ops without systemd, without systemd-inhibit, or if taking a lock fails,
+# because a build on a machine that might nap is still better than no build.
+# CROS_INHIBITED stops nested scripts from stacking a second lock.
+inhibit_sleep() {
+    [ -n "${CROS_INHIBITED:-}" ] && return 0
+    [ -d /run/systemd/system ] || return 0
+    command -v systemd-inhibit >/dev/null 2>&1 || return 0
+    systemd-inhibit --what=idle:sleep --mode=block true >/dev/null 2>&1 || return 0
+    export CROS_INHIBITED=1
+    # idle:sleep only. Deliberately NOT handle-lid-switch: a laptop lid that
+    # stops working during a multi-hour build is a worse surprise than a
+    # suspend the user asked for by closing it.
+    exec systemd-inhibit --what=idle:sleep --mode=block \
+        --who="colorburst build" --why="building colorburst (hours)" -- "$@"
+}

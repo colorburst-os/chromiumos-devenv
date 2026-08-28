@@ -12,6 +12,7 @@
 # an ebuild edit only reaches the image if that package is re-merged.
 set -eu
 . "$(dirname "$0")/common.sh"
+inhibit_sleep "$0" "$@"   # keep the host awake; released when this exits
 
 in_container chromium-build-image "
 set -x

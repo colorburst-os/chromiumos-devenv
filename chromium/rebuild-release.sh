@@ -27,6 +27,7 @@
 # driver only orchestrates them.
 set -euo pipefail
 . "$(dirname "$0")/common.sh"        # DEVENV, CHROME, BOARD, in_container
+inhibit_sleep "$0" "$@"   # keep the host awake; released when this exits
 cd "$DEVENV"
 
 # The pinned Chromium base apply-all.sh expects (see its header).
