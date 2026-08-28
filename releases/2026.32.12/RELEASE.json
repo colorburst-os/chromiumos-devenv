@@ -3,7 +3,7 @@
   "source": {
     "chromium_os": {
       "repo": "colorburst-os/chromiumos-devenv",
-      "commit": "5d28d49514d3641a80c131d630b77ad5be14d18b"
+      "commit": "425b6a3414502613e8429691675e53d47f9f9a7d"
     },
     "chromium": {
       "pinned_base": "831a446cd4",
@@ -14,7 +14,7 @@
       "note": "repo manifest -r: every project at an exact SHA"
     },
     "forks": {
-      "board-overlays": "c70abbf9eedc52e38340b876a6b40bf72290e9ea",
+      "board-overlays": "b5ff86b53a2982cef27ba486b2187bc9029b507b",
       "crosvm": "d1dd56403fb897955c54f2827aa4e5851db1f1e5"
     }
   },

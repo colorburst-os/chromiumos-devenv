@@ -86,7 +86,7 @@
     <annotation name="branch-mode" value="drop"/>
   </project>
   <project name="chromiumos/manifest" path="manifest" revision="d3271c360b051d1ce0a4530eec6a56a190aade50" upstream="refs/heads/main" dest-branch="refs/heads/main"/>
-  <project name="chromiumos/overlays/board-overlays" path="src/overlays" revision="c70abbf9eedc52e38340b876a6b40bf72290e9ea" upstream="refs/heads/main" dest-branch="refs/heads/main" groups="firmware,minilayout,paygen"/>
+  <project name="chromiumos/overlays/board-overlays" path="src/overlays" revision="b5ff86b53a2982cef27ba486b2187bc9029b507b" upstream="refs/heads/main" dest-branch="refs/heads/main" groups="firmware,minilayout,paygen"/>
   <project name="chromiumos/overlays/chromiumos-overlay" path="src/third_party/chromiumos-overlay" revision="45e36fd902dc769f608527bcdab8041c212cce0c" upstream="refs/heads/main" dest-branch="refs/heads/main" groups="firmware,labtools,minilayout,paygen,ti50" sync-c="true"/>
   <project name="chromiumos/overlays/eclass-overlay" path="src/third_party/eclass-overlay" revision="1bd4cd2284b823478d6a19e3e58efa876af4b577" upstream="refs/heads/main" dest-branch="refs/heads/main" groups="firmware,labtools,minilayout,paygen"/>
   <project name="chromiumos/overlays/portage-stable" path="src/third_party/portage-stable" revision="a20bcb64d5510909d41c53cd3fada51237a049d3" upstream="refs/heads/main" dest-branch="refs/heads/main" groups="firmware,labtools,minilayout,paygen"/>
