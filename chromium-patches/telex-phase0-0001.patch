@@ -1,4 +1,4 @@
-From 05252ad6f9f3c65e133d2950bf7213f1c73af548 Mon Sep 17 00:00:00 2001
+From 4f386d1e3846709b7bddd69150bdf4db262ccc6f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
  <212658678+luuoaoa@users.noreply.github.com>
 Date: Sat, 15 Aug 2026 11:50:21 -0700
@@ -27,13 +27,20 @@ selection needs the signal.
 Verified on a VM: 16 Telex sequences produce what a typist expects, and the
 composition draws with no underline.
 
+Scoped to vkd_vi_ rather than the whole vkd_ family: the m17n extension
+also hosts Arabic, Persian, Ethiopic, Thai, Tamil, Bengali, Devanagari,
+Gujarati, Kannada, Malayalam and Telugu, and stripping their composition
+underline was never the intent.
 ---
+ .../ash/input_method/input_method_engine.cc   | 59 +++++++++++++++++++
+ .../ash/services/ime/rule_based_engine.cc     |  7 ++-
+ 2 files changed, 65 insertions(+), 1 deletion(-)
 
 diff --git a/chrome/browser/ash/input_method/input_method_engine.cc b/chrome/browser/ash/input_method/input_method_engine.cc
-index 0a09d8bb24..8da0d6fdbb 100644
+index 0a09d8bb24..dfc11f3e60 100644
 --- a/chrome/browser/ash/input_method/input_method_engine.cc
 +++ b/chrome/browser/ash/input_method/input_method_engine.cc
-@@ -146,6 +146,25 @@ void InputMethodEngine::DiacriticsSettingsChanged() {
+@@ -146,6 +146,29 @@ void InputMethodEngine::DiacriticsSettingsChanged() {
    }
  }
  
@@ -43,15 +50,19 @@ index 0a09d8bb24..8da0d6fdbb 100644
 +// upstream's underline sits under very nearly everything a Vietnamese user
 +// types. Windows UniKey, which is what our users are used to, draws nothing.
 +//
-+// The transliterating input methods are the "vkd_" family; the underline is
-+// left alone for everything else, where it still earns its place (Chinese and
-+// Japanese compose long runs and the user picks candidates from them).
++// Scoped to the Vietnamese layouts, not the whole "vkd_" family. The m17n
++// extension also hosts Arabic, Persian, Ethiopic, Thai, Tamil, Bengali and
++// friends, and there is no reason to strip their composition underline -- a
++// bare "vkd_" prefix did exactly that.
 +//
-+// This is applied in the extension path, not in ime_service's rule-based
-+// engine, because it is the extension that actually serves these input
-+// methods -- see VIETNAMESE-IME.md 9.
++// This only affects the extension path. The mojo engines (UnikeyEngine for
++// vkd_vi_*) hand their spans straight to the IMEBridge in
++// NativeInputMethodEngineObserver::SetComposition and never reach here, which
++// is why the user-facing "show underline" setting still works: UnikeyEngine
++// reads it and styles the span itself.
 +bool HidesCompositionUnderline(const std::string& component_id) {
-+  return base::StartsWith(component_id, "vkd_", base::CompareCase::SENSITIVE);
++  return base::StartsWith(component_id, "vkd_vi_",
++                          base::CompareCase::SENSITIVE);
 +}
 +
 +}  // namespace
@@ -59,7 +70,7 @@ index 0a09d8bb24..8da0d6fdbb 100644
  const std::string& InputMethodEngine::GetActiveComponentId() const {
    return active_component_id_;
  }
-@@ -353,11 +372,37 @@ bool InputMethodEngine::SetComposition(int context_id,
+@@ -353,11 +376,37 @@ bool InputMethodEngine::SetComposition(int context_id,
          continue;
      }
  
@@ -97,7 +108,7 @@ index 0a09d8bb24..8da0d6fdbb 100644
    // TODO(nona): Makes focus out mode configuable, if necessary.
    UpdateComposition(composition_text, cursor, true);
    return true;
-@@ -401,6 +446,11 @@ bool InputMethodEngine::SetCompositionRange(
+@@ -401,6 +450,11 @@ bool InputMethodEngine::SetCompositionRange(
          break;
      }
  
@@ -109,7 +120,7 @@ index 0a09d8bb24..8da0d6fdbb 100644
      text_span.start_offset = segment.start;
      text_span.end_offset = segment.end;
      text_spans.push_back(text_span);
-@@ -464,6 +514,11 @@ bool InputMethodEngine::SetComposingRange(
+@@ -464,6 +518,11 @@ bool InputMethodEngine::SetComposingRange(
          break;
      }
  
@@ -140,3 +151,6 @@ index 955e9bfdc3..05b25ea954 100644
      const int new_cursor_position = text.length();
      host->SetComposition(std::move(text), std::move(spans),
                           new_cursor_position);
+-- 
+2.53.0
+
