@@ -72,7 +72,10 @@ date -Is
 cd ~/chromiumos
 
 # Kernel without the bring-up consoles. --usepkg=n so the USE change really
-# rebuilds (cached binpkgs are trap #1).
+# rebuilds (cached binpkgs are trap #1). Also carries our colorburst patch
+# (CONFIG_VIRTIO_INPUT on reven -- see kernel-patches/), so cros-workon must
+# be started first or emerge quietly builds the pinned upstream revision.
+cros_sdk -- cros_workon --board=${BOARD} start sys-kernel/chromeos-kernel-6_12 2>/dev/null
 cros_sdk -- env USE='-vtconsole -fbconsole -efi_earlycon' \
   emerge-${BOARD} -v --usepkg n --getbinpkg n sys-kernel/chromeos-kernel-6_12
 [ \$? -eq 0 ] || exit 1
@@ -119,7 +122,9 @@ echo \"RELEASE R${REL}: \$IMGDIR/colorburst-${REL}-release.bin\"
 # Put the sysroot back in the dev configuration so the next build-image.sh
 # run is unaffected (the BSP it re-merges itself, but nothing in the dev
 # flow re-merges the kernel, and a console-less kernel would silently ship
-# in the next dev image otherwise).
+# in the next dev image otherwise). Workon is already started from above, but
+# repeat it (idempotent) so this step is correct read on its own too.
+cros_sdk -- cros_workon --board=${BOARD} start sys-kernel/chromeos-kernel-6_12 2>/dev/null
 cros_sdk -- emerge-${BOARD} -v --usepkg n --getbinpkg n \
   sys-kernel/chromeos-kernel-6_12 chromeos-base/chromeos-bsp-${BOARD}
 date -Is

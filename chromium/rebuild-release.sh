@@ -6,9 +6,10 @@
 #   chromium/rebuild-release.sh
 #
 # What it does, in order:
-#   1. Normalise the patch state of both patched trees to the committed series:
+#   1. Normalise the patch state of every patched tree to the committed series:
 #        - chromium-src : hard-reset to the pinned base, then apply-all.sh
 #        - platform2    : the whole platform2-patches series (idempotent)
+#        - kernel       : the whole kernel-patches series (idempotent)
 #   2. Nuke the board build cache for a clean build -- the colorburst sysroot
 #      (+ its binpkgs), the retired amd64-generic sysroot, and old images.
 #      KEEPS out/sdk (the host SDK, expensive to rebuild) and .cache/distfiles
@@ -62,6 +63,9 @@ platform2-patches/apply.sh chromiumos/src/platform2
 # (No chromite patch: the DLC factory-install approach was reverted -- Crostini
 # DLCs are served from the update server, so the stock chromite/dlc_allowlist.py
 # and upstream termina-dlc ebuilds are used unchanged.)
+
+log "kernel: apply the whole patch series (reven virtio-input)"
+kernel-patches/apply.sh chromiumos/src/third_party/kernel/v6.12
 
 # --- 2. nuke the board build cache (clean build) ----------------------------
 # `setup_board --force`, NOT `rm -rf out/build/${BOARD}`.

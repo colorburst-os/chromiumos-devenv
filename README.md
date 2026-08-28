@@ -161,6 +161,7 @@ Disable Secure Boot in UEFI, boot from the USB stick, and select **local image A
 | `chromium/` | Chrome tooling: fetch, build, VM deployment, image cutting; see [chromium/README.md](chromium/README.md) |
 | `chromium-patches/` | Patch series and vendored IME payloads, applied by `apply-all.sh` |
 | `platform2-patches/` | ChromeOS system-code patches: device ID, DLC fetch host, region input methods |
+| `kernel-patches/` | ChromeOS kernel config patches: virtio-input on reven, for crosvm mouse/keyboard |
 | `release/` | Version cutting, payload generation, language variants, YubiKey signing, publishing; see [releases/README.md](releases/README.md) |
 | `tools/` | `vm-instance.sh` (parallel VMs), `cdp.py` (Chrome via DevTools), `guest-type.py`, and related tools |
 
