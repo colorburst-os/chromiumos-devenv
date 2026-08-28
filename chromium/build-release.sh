@@ -154,7 +154,13 @@ echo "$LSB" | grep -q "CHROMEOS_RELEASE_TRACK=stable-channel"; check "stable-cha
 echo "$LSB" | grep -q "CHROMEOS_RELEASE_APPID={3EFFC3C6-5828-4F3A-967D-BAEA412E2DC8}"; check "appid" $?
 dbg /usr/share/update_engine/update-payload-key.pub.pem | grep -q "BEGIN PUBLIC KEY"
 check "payload pubkey present" $?
-dbg /etc/os-release.d/VERSION | grep -q "R${REL}"; check "os-release VERSION=R${REL}" $?
+dbg /etc/os-release.d/COLORBURST_VERSION | grep -q "R${REL}"
+check "os-release COLORBURST_VERSION=R${REL}" $?
+# os-release VERSION must stay upstream's numeric milestone: btmanagerd's
+# pre-start runs printf '%04x' on it under sh -e, and a non-numeric value
+# kills Floss and with it all Bluetooth.
+dbg /etc/os-release | grep -qE '^VERSION=[0-9]+$'
+check "os-release VERSION numeric" $?
 [ -z "$(dbg /etc/init/cb-diag.conf)" ]; check "cb-diag.conf absent" $?
 CDC=$(dbg /etc/chrome_dev.conf)
 ! echo "$CDC" | grep -q "remote-debugging-port"; check "no devtools port" $?
