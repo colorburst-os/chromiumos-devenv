@@ -127,4 +127,9 @@ am ime-vni-and-methods-0001.patch
 # no other patch edits; generated at full-series HEAD, so it applies last.
 am degoogle-0006-remove-ai-and-you-and-google.patch
 
+# Name the browser "Browser" in the launcher and its About menu item, title the
+# Settings About page after colorburst, and report the colorburst release
+# version there instead of Chrome's. Generated at full-series HEAD.
+am branding-0004-browser-name-and-version.patch
+
 echo "OK. All colorburst patches applied. Now rebuild chrome (ash-chrome)."

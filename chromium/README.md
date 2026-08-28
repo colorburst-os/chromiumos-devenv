@@ -49,6 +49,7 @@ The full series, in the order `apply-all.sh` applies it:
 | 30 | `telex-i18n-underline-0001.patch` | finishes the Vietnamese options-page translations; composition underline off by default |
 | 31 | `ime-vni-and-methods-0001.patch` | adds VNI and VIQR as selectable methods, routed through the same UniKey engine |
 | 32 | `degoogle-0006-remove-ai-and-you-and-google.patch` | removes the "AI in Chrome" page and the "You and Google" section from Settings |
+| 33 | `branding-0004-browser-name-and-version.patch` | the launcher and About menu call the browser Browser, Settings says About colorburst, and the About page reports the colorburst release version |
 
 **On the Vietnamese patches.** There are a lot of them, and none of them make
 this a Vietnamese build. Every one is locale-scoped — a `vi` `.xtb` translation,
