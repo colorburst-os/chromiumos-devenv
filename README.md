@@ -103,6 +103,15 @@ For day-to-day development, after one `chromium/bootstrap-board.sh`, use `chromi
 
 **Do not run plain `cros build-packages`.** It fetches Google's prebuilt Chrome from the binhost and discards the patch series. The scripts above pass the required flags.
 
+On a machine with nothing on it yet, `release/build-from-scratch.sh` does all of the above from one command — it clones this repository itself, so it is the only file you need to copy over:
+
+```bash
+release/build-from-scratch.sh --preflight /data/cbos   # check the host first
+release/build-from-scratch.sh /data/cbos               # or a tag: ... /data/cbos v2026.32.12
+```
+
+It runs the sequence in this README (clone → `repo sync` → Chromium fetch → `apply-all.sh` → `rebuild-release.sh`) and then writes the USB language variants, leaving a release image, an unsigned OTA payload and two zips. It signs, publishes, tags and pushes nothing. Each phase is stamped and skipped on a re-run, so an interrupted build resumes where it stopped. Allow ~250 GB and about five hours cold.
+
 ## 4. Use the image
 
 Release images are in `chromiumos/src/build/images/colorburst/latest/`.
