@@ -132,4 +132,16 @@ am degoogle-0006-remove-ai-and-you-and-google.patch
 # version there instead of Chrome's. Generated at full-series HEAD.
 am branding-0004-browser-name-and-version.patch
 
+# Stop describing an external monitor that advertises BT.2020 + PQ as HDR when
+# kEnableExternalDisplayHDR10Mode is off and we therefore drive it in SDR --
+# the mismatch made every HDR-capable external display look washed out. Touches
+# ui/display only; generated at full-series HEAD, so it applies last.
+am display-0001-no-hdr-without-hdr10-mode.patch
+
+# Turn off the two Privacy Sandbox features (Attribution Reporting, Shared
+# Storage) that were only off because Chromium's field trial testing config
+# disabled them; the board now opts out of that config (EXTRA_GN_ARGS in
+# overlay-colorburst make.defaults), so the code default has to say it.
+am degoogle-0007-privacy-sandbox-off.patch
+
 echo "OK. All colorburst patches applied. Now rebuild chrome (ash-chrome)."

@@ -1,0 +1,50 @@
+From 9f1d6fe1238347387178bbf6b5c372fe9ffa66ef Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Tue, 8 Sep 2026 21:15:04 -0700
+Subject: [PATCH] Turn off Attribution Reporting and Shared Storage
+
+Both Privacy Sandbox features default to enabled upstream, and both were only
+off in colorburst because Chromium's field trial testing config happened to
+disable them. We now opt out of that config, so the code default has to carry
+it instead.
+---
+ components/attribution_reporting/features.cc | 6 +++++-
+ services/network/public/cpp/features.cc      | 5 ++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/components/attribution_reporting/features.cc b/components/attribution_reporting/features.cc
+index b199e7682a..b5153dd38e 100644
+--- a/components/attribution_reporting/features.cc
++++ b/components/attribution_reporting/features.cc
+@@ -9,6 +9,10 @@
+ namespace attribution_reporting::features {
+ 
+ // Controls whether the Conversion Measurement API infrastructure is enabled.
+-BASE_FEATURE(kConversionMeasurement, base::FEATURE_ENABLED_BY_DEFAULT);
++// colorburst: off. This is ad attribution measurement; a de-Googled build has
++// no use for it, and upstream is deprecating it anyway. Chromium's checked-in
++// field trial config used to disable it for us as a side effect -- we opt out
++// of that config now, so the default has to say it.
++BASE_FEATURE(kConversionMeasurement, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ }  // namespace attribution_reporting::features
+diff --git a/services/network/public/cpp/features.cc b/services/network/public/cpp/features.cc
+index 460f10739f..d54b9602c6 100644
+--- a/services/network/public/cpp/features.cc
++++ b/services/network/public/cpp/features.cc
+@@ -429,7 +429,10 @@ BASE_FEATURE(kBrowsingTopics, base::FEATURE_ENABLED_BY_DEFAULT);
+ // automatically expose this API to the web, it only allows the element to be
+ // enabled by the runtime enabled feature, for origin trials.
+ // https://github.com/pythagoraskitty/shared-storage/blob/main/README.md
+-BASE_FEATURE(kSharedStorageAPI, base::FEATURE_ENABLED_BY_DEFAULT);
++// colorburst: off, for the same reason as kConversionMeasurement -- a Privacy
++// Sandbox surface upstream is deprecating, which the field trial testing config
++// happened to disable for us until we opted out of it.
++BASE_FEATURE(kSharedStorageAPI, base::FEATURE_DISABLED_BY_DEFAULT);
+ BASE_FEATURE_PARAM(size_t,
+                    kSharedStorageURLSelectionOperationInputURLSizeLimit,
+                    &kSharedStorageAPI,
+-- 
+2.53.0
+

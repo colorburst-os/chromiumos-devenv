@@ -1,0 +1,97 @@
+From 34830c4f1a5cb028c48cdb5809cff663ae6fc03f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?L=C6=B0u=20Oa=20Oa?=
+ <212658678+luuoaoa@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 22:24:14 -0700
+Subject: [PATCH] Do not describe an SDR-driven display as HDR
+
+GetColorSpaceFromEdid() gave any monitor advertising BT.2020 plus PQ an HDR
+transfer function, even though the HDR10 return right below it is gated on
+kEnableExternalDisplayHDR10Mode, which is off by default. DrmDisplay then
+left the connector at Colorspace=Default with no HDR metadata, so the sink
+stayed in SDR while CreateDisplayColorSpaces() handed the display a 10-bit
+plane and 1.1 of luminance headroom it never received, and the picture came
+out flat and washed out on every HDR-capable external monitor.
+---
+ ui/display/util/display_util.cc          | 26 ++++++++++++++++++------
+ ui/display/util/display_util_unittest.cc | 10 +++++++++
+ 2 files changed, 30 insertions(+), 6 deletions(-)
+
+diff --git a/ui/display/util/display_util.cc b/ui/display/util/display_util.cc
+index 2ce08bf583..3015fd9834 100644
+--- a/ui/display/util/display_util.cc
++++ b/ui/display/util/display_util.cc
+@@ -173,20 +173,34 @@ gfx::ColorSpace GetColorSpaceFromEdid(const display::EdidParser& edid_parser) {
+           EdidParser::PrimaryMatrixPair(
+               gfx::ColorSpace::PrimaryID::BT2020,
+               gfx::ColorSpace::MatrixID::BT2020_NCL))) {
+-    if (edid_parser.supported_color_transfer_ids().contains(
+-            gfx::ColorSpace::TransferID::PQ)) {
++#if BUILDFLAG(IS_CHROMEOS)
++    // Only describe the display with an HDR transfer function if we can
++    // actually drive it as HDR. With kEnableExternalDisplayHDR10Mode off,
++    // DrmDisplay's constructor leaves the connector at Colorspace=Default and
++    // clears HDR_OUTPUT_METADATA, so the sink stays in SDR -- but the snapshot
++    // color space is still IsHDR(), and CreateDisplayColorSpaces() then hands
++    // the display a 10-bit plane and 1.1 of luminance headroom it never
++    // receives. The picture that comes out is flat and washed out. Leave the
++    // transfer INVALID instead; the gamma-based SDR path below describes such
++    // a display correctly.
++    const bool can_output_hdr = base::FeatureList::IsEnabled(
++        display::features::kEnableExternalDisplayHDR10Mode);
++#else
++    const bool can_output_hdr = true;
++#endif
++    if (can_output_hdr && edid_parser.supported_color_transfer_ids().contains(
++                              gfx::ColorSpace::TransferID::PQ)) {
+       transfer_id = gfx::ColorSpace::TransferID::PQ;
+ #if BUILDFLAG(IS_CHROMEOS)
+-      if (base::FeatureList::IsEnabled(
+-              display::features::kEnableExternalDisplayHDR10Mode) &&
+-          edid_parser.is_external_display() &&
++      if (edid_parser.is_external_display() &&
+           edid_parser.supported_color_primary_matrix_ids().contains(
+               EdidParser::PrimaryMatrixPair(gfx::ColorSpace::PrimaryID::BT2020,
+                                             gfx::ColorSpace::MatrixID::RGB))) {
+         return gfx::ColorSpace::CreateHDR10();
+       }
+ #endif
+-    } else if (edid_parser.supported_color_transfer_ids().contains(
++    } else if (can_output_hdr &&
++               edid_parser.supported_color_transfer_ids().contains(
+                    gfx::ColorSpace::TransferID::HLG)) {
+       transfer_id = gfx::ColorSpace::TransferID::HLG;
+     }
+diff --git a/ui/display/util/display_util_unittest.cc b/ui/display/util/display_util_unittest.cc
+index d0cc12fd37..879c97f7ba 100644
+--- a/ui/display/util/display_util_unittest.cc
++++ b/ui/display/util/display_util_unittest.cc
+@@ -7,9 +7,12 @@
+ #include <vector>
+ 
+ #include "base/test/metrics/histogram_tester.h"
++#include "base/test/scoped_feature_list.h"
++#include "build/build_config.h"
+ #include "components/viz/common/resources/shared_image_format.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ #include "ui/display/display.h"
++#include "ui/display/display_features.h"
+ #include "ui/display/display_util.h"
+ #include "ui/display/screen_info.h"
+ #include "ui/display/test/display_test_util.h"
+@@ -246,6 +249,13 @@ TEST(DisplayUtilTest, TestValidDisplaySize) {
+ }
+ 
+ TEST(DisplayUtilTest, GetColorSpaceFromEdid) {
++#if BUILDFLAG(IS_CHROMEOS)
++  // The HDR cases below expect a PQ transfer function, which is only
++  // handed out when the display can actually be driven as HDR10.
++  base::test::ScopedFeatureList hdr10_mode;
++  hdr10_mode.InitAndEnableFeature(
++      display::features::kEnableExternalDisplayHDR10Mode);
++#endif
+   base::HistogramTester histogram_tester;
+ 
+   // Test with HP z32x monitor.
+-- 
+2.53.0
+
