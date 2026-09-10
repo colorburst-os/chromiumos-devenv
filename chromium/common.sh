@@ -12,7 +12,12 @@
 #     CHROME=/somewhere/chromium-src chromium/build.sh
 set -u
 
-DEVENV="${DEVENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# pwd -P, not pwd: ~/develop/chromium-os is a symlink to
+# ~/develop/colorburst-os/chromium-os, and a logical pwd through it makes
+# CHROME resolve to ~/develop/chromium-src -- which does not exist, so docker
+# silently creates it empty and root-owned, and cros_sdk dies with
+# "could not find CHROME_ROOT/src dir".
+DEVENV="${DEVENV:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 CHROME="${CHROME:-$(cd "$DEVENV/.." && pwd)/chromium-src}"
 BOARD="${BOARD:-colorburst}"
 DOCKER_IMAGE="${DOCKER_IMAGE:-cros-build}"
